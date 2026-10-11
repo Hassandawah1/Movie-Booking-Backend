@@ -16,6 +16,28 @@ const express = require("express")
 const app = express()
 const mongoose = require("mongoose")
 const cors = require("cors")
+const URI = process.env.MONGODB_URI
+
+let connectionPromise
+const connectToDatabase = async () => {
+  if (mongoose.connection.readyState === 1) return
+  if (!URI) throw new Error("MONGODB_URI environment variable is not set")
+
+  if (!connectionPromise) {
+    connectionPromise = mongoose.connect(URI, {
+      maxPoolSize: 10,
+      minPoolSize: 2,
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000
+    }).then(() => {
+      console.info("Database connected successfully")
+    }).finally(() => {
+      connectionPromise = null
+    })
+  }
+
+  await connectionPromise
+}
 
 // Middleware
 const corsOptions = {
@@ -41,6 +63,22 @@ app.use(
     }
   })
 )
+
+// Wait for MongoDB before allowing API routes to run.
+app.use("/api", async (req, res, next) => {
+  if (req.path === "/health" || req.path === "/ready") return next()
+
+  try {
+    await connectToDatabase()
+    next()
+  } catch (error) {
+    console.error("Database unavailable for API request:", error.message)
+    res.status(503).json({
+      success: false,
+      message: "Database unavailable. Please try again later."
+    })
+  }
+})
 
 // Request logging middleware (should come after requestId and security headers)
 app.use((req, res, next) => {
@@ -118,16 +156,7 @@ app.get("/api/health", (req, res) => {
 // Readiness endpoint (checks dependencies)
 app.get("/api/ready", async (req, res) => {
   try {
-    // Check MongoDB connection
-    if (mongoose.connection.readyState !== 1) { // 1 = connected
-      return res.status(503).json({
-        success: false,
-        status: "service_unavailable",
-        reason: "database_disconnected"
-      })
-    }
-
-    // All checks passed
+    await connectToDatabase()
     res.status(200).json({
       success: true,
       status: "ok"
@@ -149,29 +178,6 @@ app.get("/", (req, res) => {
     message: "Welcome to the Movie Booking API"
   })
 })
-
-// Database connection with enhanced logging
-const URI = process.env.MONGODB_URI
-console.log("Backend using MONGODB_URI:", URI ? URI.replace(/:\/\/[^@]+@/, "://****@") : "undefined")
-if (URI) {
-  mongoose
-    .connect(URI, {
-      // Connection pool options
-      maxPoolSize: 10,
-      minPoolSize: 2,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    })
-    .then(() => {
-      console.info("Database connected successfully")
-    })
-    .catch((err) => {
-      console.error("Cannot connect to DB:", err.message)
-      // Don't exit here - let readiness endpoint handle DB disconnection
-    })
-} else {
-  console.warn("MONGODB_URI environment variable is not set")
-}
 
 // 404 handler - ensure JSON response format
 app.use((req, res) => {
@@ -199,6 +205,10 @@ app.use((err, req, res, next) => {
 // Start server only when executed directly (not when required by tests)
 if (require.main === module) {
   const PORT = process.env.PORT || 5000
+  connectToDatabase().catch((error) => {
+    console.error("Cannot connect to DB:", error.message)
+  })
+
   const server = app.listen(PORT, (err) => {
     if (err) {
       console.error("Cannot start server at this time:", err.message)

@@ -88,7 +88,7 @@ const bookingSchema = new mongoose.Schema(
       required: [true, "Expiration date is required"]
     },
 
-    // ── Paystack Payment & Confirmation Details (Phase 6) ──
+
     paymentReference: {
       type: String,
       trim: true
@@ -99,16 +99,11 @@ const bookingSchema = new mongoose.Schema(
       trim: true
     },
 
-    // Short-lived in-flight lock so two concurrent requests cannot open two
-    // live Paystack transactions for the same booking (Phase 12).
     paymentInitializingAt: {
       type: Date,
       default: null
     },
 
-    // Why the last payment attempt did not complete: "abandoned" (customer
-    // closed checkout), "failed" (gateway declined), "amount-mismatch", etc.
-    // Lets the UI say "not completed" instead of wrongly saying "failed".
     paymentFailureReason: {
       type: String,
       trim: true
@@ -158,7 +153,7 @@ const bookingSchema = new mongoose.Schema(
   }
 )
 
-// Index for query performance and status lookups
+
 bookingSchema.index({ user: 1, createdAt: -1 })
 bookingSchema.index({ showtime: 1, bookingStatus: 1 })
 bookingSchema.index({ expiresAt: 1, bookingStatus: 1 })

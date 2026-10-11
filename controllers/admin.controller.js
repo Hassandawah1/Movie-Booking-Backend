@@ -6,7 +6,7 @@ const Showtime = require("../models/Showtime.model")
 const Booking = require("../models/Booking.model")
 const { sendRoleChangedEmail } = require("../services/email.service")
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 
 const todayMidnight = () => {
   const d = new Date()
@@ -20,9 +20,9 @@ const todayEndOfDay = () => {
   return d
 }
 
-// Format a Date as YYYY-MM-DD using LOCAL calendar parts.
-// (toISOString() converts to UTC, which shifts the date by a day in positive
-// offsets such as Africa/Lagos and would echo a different range than requested.)
+
+
+
 const toLocalDateString = (date) => {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null
   const month = String(date.getMonth() + 1).padStart(2, "0")
@@ -30,17 +30,17 @@ const toLocalDateString = (date) => {
   return `${date.getFullYear()}-${month}-${day}`
 }
 
-// ─── 1. Dashboard Summary ───────────────────────────────────────────────────
 
-// @desc    Get top-level dashboard metrics (counts, revenue, statuses)
-// @route   GET /api/admin/dashboard
-// @access  Admin
+
+
+
+
 const getDashboardSummary = async (req, res) => {
   try {
     const todayStart = todayMidnight()
     const todayEnd = todayEndOfDay()
 
-    // Parallel metric queries
+    
     const [
       totalUsers,
       totalMovies,
@@ -77,12 +77,12 @@ const getDashboardSummary = async (req, res) => {
       Booking.countDocuments({ paymentStatus: "unpaid" }),
       Booking.countDocuments({ paymentStatus: "failed" }),
       Booking.countDocuments({ paymentStatus: "refunded" }),
-      // Total Revenue aggregation (only paid bookings)
+      
       Booking.aggregate([
         { $match: { paymentStatus: "paid" } },
         { $group: { _id: null, total: { $sum: "$totalAmount" } } }
       ]),
-      // Today's Revenue aggregation (based on paidAt or fallback to createdAt)
+      
       Booking.aggregate([
         {
           $match: {
@@ -141,11 +141,11 @@ const getDashboardSummary = async (req, res) => {
   }
 }
 
-// ─── 2. Revenue Analytics By Date Range ─────────────────────────────────────
 
-// @desc    Get total revenue within a date range
-// @route   GET /api/admin/analytics/revenue
-// @access  Admin
+
+
+
+
 const getRevenueAnalytics = async (req, res) => {
   try {
     let { startDate, endDate } = req.query
@@ -160,7 +160,7 @@ const getRevenueAnalytics = async (req, res) => {
       }
       start.setHours(0, 0, 0, 0)
     } else {
-      // Default: Start of current month
+      
       start = new Date()
       start.setDate(1)
       start.setHours(0, 0, 0, 0)
@@ -173,7 +173,7 @@ const getRevenueAnalytics = async (req, res) => {
       }
       end.setHours(23, 59, 59, 999)
     } else {
-      // Default: End of today
+      
       end = todayEndOfDay()
     }
 
@@ -221,11 +221,11 @@ const getRevenueAnalytics = async (req, res) => {
   }
 }
 
-// ─── 3. Revenue Trend (7d / 30d) ─────────────────────────────────────────────
 
-// @desc    Get daily revenue trend for the last 7 or 30 days
-// @route   GET /api/admin/analytics/revenue-trend
-// @access  Admin
+
+
+
+
 const getRevenueTrend = async (req, res) => {
   try {
     const period = req.query.period === "30d" ? "30d" : "7d"
@@ -270,13 +270,13 @@ const getRevenueTrend = async (req, res) => {
       dataMap.set(item._id, { revenue: item.revenue, bookings: item.bookings })
     }
 
-    // Build continuous chronological daily array
+    
     const trendData = []
     for (let i = 0; i < days; i++) {
       const d = new Date(startDate)
       d.setDate(d.getDate() + i)
-      // Local calendar date — toISOString() would shift the label back a day
-      // in positive UTC offsets and mis-date every row of the trend.
+      
+      
       const dateStr = toLocalDateString(d)
       const existing = dataMap.get(dateStr)
 
@@ -298,11 +298,11 @@ const getRevenueTrend = async (req, res) => {
   }
 }
 
-// ─── 4. Recent Bookings ──────────────────────────────────────────────────────
 
-// @desc    Get latest bookings across the platform
-// @route   GET /api/admin/bookings/recent
-// @access  Admin
+
+
+
+
 const getRecentBookings = async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10))
@@ -357,11 +357,11 @@ const getRecentBookings = async (req, res) => {
   }
 }
 
-// ─── 5. Upcoming Showtimes ───────────────────────────────────────────────────
 
-// @desc    Get upcoming scheduled showtimes with seat fill statistics
-// @route   GET /api/admin/showtimes/upcoming
-// @access  Admin
+
+
+
+
 const getUpcomingShowtimes = async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10))
@@ -419,11 +419,11 @@ const getUpcomingShowtimes = async (req, res) => {
   }
 }
 
-// ─── 6. Top-Performing Movies ───────────────────────────────────────────────
 
-// @desc    Get top movies based on revenue or booking counts
-// @route   GET /api/admin/analytics/top-movies
-// @access  Admin
+
+
+
+
 const getTopMovies = async (req, res) => {
   try {
     const sortBy = req.query.sortBy === "bookings" ? "bookings" : "revenue"
@@ -477,11 +477,11 @@ const getTopMovies = async (req, res) => {
   }
 }
 
-// ─── 7. Booking Status Analytics ────────────────────────────────────────────
 
-// @desc    Get breakdown of booking statuses
-// @route   GET /api/admin/analytics/bookings
-// @access  Admin
+
+
+
+
 const getBookingAnalytics = async (req, res) => {
   try {
     const [total, confirmed, pendingPayment, cancelled, expired] = await Promise.all([
@@ -508,11 +508,11 @@ const getBookingAnalytics = async (req, res) => {
   }
 }
 
-// ─── 8. Payment Status Analytics ────────────────────────────────────────────
 
-// @desc    Get breakdown of payment statuses
-// @route   GET /api/admin/analytics/payments
-// @access  Admin
+
+
+
+
 const getPaymentAnalytics = async (req, res) => {
   try {
     const [paid, unpaid, failed, refunded] = await Promise.all([
@@ -537,16 +537,16 @@ const getPaymentAnalytics = async (req, res) => {
   }
 }
 
-// ─── 9. User Management (List Users) ────────────────────────────────────────
 
-// @desc    List all registered users with search, role filtering, and pagination
-// @route   GET /api/admin/users
-// @access  Admin
+
+
+
+
 const getAllUsers = async (req, res) => {
   try {
     const filter = {}
 
-    // Filter by role
+    
     if (req.query.role) {
       if (!["user", "admin"].includes(req.query.role)) {
         return res.status(400).json({ success: false, message: "Invalid role filter. Must be 'user' or 'admin'" })
@@ -554,7 +554,7 @@ const getAllUsers = async (req, res) => {
       filter.role = req.query.role
     }
 
-    // Search by name or email
+    
     if (req.query.search && String(req.query.search).trim()) {
       const searchRegex = new RegExp(String(req.query.search).trim(), "i")
       filter.$or = [{ name: searchRegex }, { email: searchRegex }]
@@ -590,11 +590,11 @@ const getAllUsers = async (req, res) => {
   }
 }
 
-// ─── 10. Get Single User Details ────────────────────────────────────────────
 
-// @desc    Get single user details with booking and spending metrics
-// @route   GET /api/admin/users/:id
-// @access  Admin
+
+
+
+
 const getUserById = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -606,7 +606,7 @@ const getUserById = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" })
     }
 
-    // Aggregate user spending and booking metrics
+    
     const [bookingCount, confirmedBookingCount, spendingResult] = await Promise.all([
       Booking.countDocuments({ user: user._id }),
       Booking.countDocuments({ user: user._id, bookingStatus: "confirmed" }),
@@ -637,11 +637,11 @@ const getUserById = async (req, res) => {
   }
 }
 
-// ─── 11. User Role Management ───────────────────────────────────────────────
 
-// @desc    Promote or demote user role (user <-> admin)
-// @route   PATCH /api/admin/users/:id/role
-// @access  Admin
+
+
+
+
 const updateUserRole = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -656,7 +656,7 @@ const updateUserRole = async (req, res) => {
       })
     }
 
-    // Prevent admin self-demotion to avoid accidental system lockout
+    
     if (req.user._id.toString() === req.params.id && role === "user") {
       return res.status(400).json({
         success: false,
@@ -703,11 +703,11 @@ const updateUserRole = async (req, res) => {
   }
 }
 
-// ─── 12. Showtime Occupancy ──────────────────────────────────────────────────
 
-// @desc    Get seat occupancy metrics for a specific showtime
-// @route   GET /api/admin/showtimes/:id/occupancy
-// @access  Admin
+
+
+
+
 const getShowtimeOccupancy = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -741,11 +741,11 @@ const getShowtimeOccupancy = async (req, res) => {
   }
 }
 
-// ─── 13. Showtime Revenue ────────────────────────────────────────────────────
 
-// @desc    Get ticket sales and revenue for a specific showtime
-// @route   GET /api/admin/showtimes/:id/revenue
-// @access  Admin
+
+
+
+
 const getShowtimeRevenue = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -793,11 +793,11 @@ const getShowtimeRevenue = async (req, res) => {
   }
 }
 
-// ─── 14. Movie Performance ──────────────────────────────────────────────────
 
-// @desc    Get comprehensive sales and showtime performance for a movie
-// @route   GET /api/admin/movies/:id/performance
-// @access  Admin
+
+
+
+
 const getMoviePerformance = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -854,11 +854,11 @@ const getMoviePerformance = async (req, res) => {
   }
 }
 
-// ─── 15. Screen Performance ──────────────────────────────────────────────────
 
-// @desc    Get utilization, showtime count, and revenue metrics for a cinema screen
-// @route   GET /api/admin/screens/:id/performance
-// @access  Admin
+
+
+
+
 const getScreenPerformance = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -894,7 +894,7 @@ const getScreenPerformance = async (req, res) => {
     const ticketsSold = salesResult[0]?.ticketsSold || 0
     const totalRevenue = salesResult[0]?.totalRevenue || 0
 
-    // Calculate average occupancy across showtimes for this screen
+    
     let averageOccupancy = 0
     if (totalShowtimes > 0 && screen.totalSeats > 0) {
       const totalOccupiedSeats = showtimesList.reduce(

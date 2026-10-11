@@ -2,17 +2,17 @@ const mongoose = require("mongoose")
 const axios = require("axios")
 const Movie = require("../models/Movie.model")
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+
 
 const VALID_STATUSES = ["coming-soon", "now-showing", "ended"]
 
-// Build the RapidAPI headers from env — key is never sent back to client
+
 const rapidApiHeaders = () => ({
   "X-RapidAPI-Key": process.env.MOVIE_API_KEY,
   "X-RapidAPI-Host": process.env.MOVIE_API_BASE_URL
 })
 
-// Base URL always uses https:// — env stores the host without the scheme
+
 const apiBase = () => `https://${process.env.MOVIE_API_BASE_URL}`
 
 const respondToProviderError = (res, operation, apiErr) => {
@@ -53,9 +53,9 @@ const respondToProviderError = (res, operation, apiErr) => {
   })
 }
 
-// Normalize a raw result from the netflix-api8 search endpoint
+
 const normalizeMovie = (raw) => {
-  // The API can return various field names — handle all known variants gracefully
+  
   const genres = []
   if (Array.isArray(raw.genres)) {
     raw.genres.forEach((g) => {
@@ -64,12 +64,12 @@ const normalizeMovie = (raw) => {
     })
   }
 
-  // Release date — try releaseYear first, then releaseDate
+  
   let releaseDate = null
   if (raw.releaseYear) releaseDate = new Date(`${raw.releaseYear}-01-01`)
   else if (raw.releaseDate) releaseDate = new Date(raw.releaseDate)
 
-  // Rating — try imdbRating, voteAverage, rating
+  
   const rating = raw.imdbRating || raw.voteAverage || raw.rating || null
 
   return {
@@ -211,11 +211,11 @@ const describeProviderShape = (value, depth = 0) => {
   }
 }
 
-// ─── Admin: Search external API ─────────────────────────────────────────────
 
-// @desc    Search movies from external Netflix API
-// @route   GET /api/movies/search?query=...
-// @access  Admin
+
+
+
+
 const searchMovies = async (req, res) => {
   try {
     const query = req.query.query ? req.query.query.trim() : ""
@@ -268,11 +268,11 @@ const searchMovies = async (req, res) => {
   }
 }
 
-// ─── Admin: Get external movie details ──────────────────────────────────────
 
-// @desc    Fetch single movie details from external API (preview before saving)
-// @route   GET /api/movies/external/:externalMovieId
-// @access  Admin
+
+
+
+
 const getExternalMovieDetails = async (req, res) => {
   try {
     const { externalMovieId } = req.params
@@ -318,16 +318,16 @@ const getExternalMovieDetails = async (req, res) => {
   }
 }
 
-// ─── Admin: Add movie to our cinema ─────────────────────────────────────────
 
-// @desc    Fetch from external API and save to our database
-// @route   POST /api/movies
-// @access  Admin
+
+
+
+
 const addMovieToCinema = async (req, res) => {
   try {
     const { externalMovieId } = req.body
 
-    // Validate input
+    
     if (!externalMovieId || !String(externalMovieId).trim()) {
       return res.status(400).json({
         success: false,
@@ -337,7 +337,7 @@ const addMovieToCinema = async (req, res) => {
 
     const cleanId = String(externalMovieId).trim()
 
-    // Check for duplicate
+    
     const existing = await Movie.findOne({ externalMovieId: cleanId })
     if (existing) {
       return res.status(409).json({
@@ -346,7 +346,7 @@ const addMovieToCinema = async (req, res) => {
       })
     }
 
-    // Fetch full details from external API
+    
     let response
     try {
       response = await axios.get(`${apiBase()}/api/title/details`, {
@@ -367,7 +367,7 @@ const addMovieToCinema = async (req, res) => {
 
     const normalized = normalizeMovie(raw)
 
-    // Ensure the externalMovieId matches what was requested
+    
     if (!normalized.externalMovieId) {
       normalized.externalMovieId = cleanId
     }
@@ -379,7 +379,7 @@ const addMovieToCinema = async (req, res) => {
       })
     }
 
-    // Save to our database
+    
     const movie = new Movie({
       ...normalized,
       status: "coming-soon",
@@ -402,11 +402,11 @@ const addMovieToCinema = async (req, res) => {
   }
 }
 
-// ─── Public: Get all our movies ──────────────────────────────────────────────
 
-// @desc    List all movies stored in our database (with optional status filter)
-// @route   GET /api/movies?status=now-showing
-// @access  Public
+
+
+
+
 const getAllMovies = async (req, res) => {
   try {
     const filter = {}
@@ -438,11 +438,11 @@ const getAllMovies = async (req, res) => {
   }
 }
 
-// ─── Public: Get single movie by DB id ──────────────────────────────────────
 
-// @desc    Get a single movie from our database by its MongoDB _id
-// @route   GET /api/movies/:id
-// @access  Public
+
+
+
+
 const getMovieById = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -466,7 +466,7 @@ const getMovieById = async (req, res) => {
       movie
     })
   } catch (err) {
-    // CastError means the id format was invalid
+    
     if (err.name === "CastError") {
       return res.status(400).json({
         success: false,
@@ -481,11 +481,11 @@ const getMovieById = async (req, res) => {
   }
 }
 
-// ─── Admin: Update movie ─────────────────────────────────────────────────────
 
-// @desc    Update movie status (and optionally title/overview)
-// @route   PUT /api/movies/:id
-// @access  Admin
+
+
+
+
 const updateMovie = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -494,7 +494,7 @@ const updateMovie = async (req, res) => {
 
     const { status, title, overview } = req.body
 
-    // At least one field must be provided
+    
     if (status === undefined && title === undefined && overview === undefined) {
       return res.status(400).json({
         success: false,
@@ -554,11 +554,11 @@ const updateMovie = async (req, res) => {
   }
 }
 
-// ─── Admin: Delete movie ─────────────────────────────────────────────────────
 
-// @desc    Remove a movie from our cinema database
-// @route   DELETE /api/movies/:id
-// @access  Admin
+
+
+
+
 const deleteMovie = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -587,7 +587,7 @@ const deleteMovie = async (req, res) => {
   }
 }
 
-// ─── Exports ─────────────────────────────────────────────────────────────────
+
 
 module.exports = {
   searchMovies,

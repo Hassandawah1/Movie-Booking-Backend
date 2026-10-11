@@ -5,15 +5,15 @@ const dns = require("dns")
 try {
   dns.setServers(["8.8.8.8", "8.8.4.4"])
 } catch (e) {
-  // Ignore in environments where setServers is restricted
+  
 }
 
-// Enable MongoDB driver debug logging
+
 mongoose.set('debug', true)
 
 const User = require("../models/User.model")
 
-// Validate required environment variables
+
 const requiredEnvVars = ["ADMIN_NAME", "ADMIN_EMAIL", "ADMIN_PASSWORD", "MONGODB_URI", "JWT_SECRET"]
 for (const varName of requiredEnvVars) {
   if (!process.env[varName]) {
@@ -22,10 +22,10 @@ for (const varName of requiredEnvVars) {
   }
 }
 
-// Debug: Show the MONGODB_URI being used (without credentials)
+
 const uri = process.env.MONGODB_URI
 if (uri) {
-  // Hide credentials in output - replace everything between :// and @ with ****
+  
   const uriWithoutCreds = uri.replace(/:\/\/[^@]+@/, "://****@")
   console.log(`Using MONGODB_URI: ${uriWithoutCreds}`)
 }
@@ -46,7 +46,7 @@ if (adminPassword.length < 6) {
 
 function seedAdmin() {
   return new Promise((resolve, reject) => {
-    // Add a small delay to ensure network is ready
+    
     setTimeout(() => {
       mongoose.connect(process.env.MONGODB_URI, {
         maxPoolSize: 10,
@@ -56,13 +56,13 @@ function seedAdmin() {
       })
       .then(() => {
         console.log("Connected to MongoDB for admin seeding...")
-        // Continue with the seeding logic
+        
         return seedAdminLogic()
       })
       .then((success) => {
-        // Success
+        
         console.log("\n✅ Admin seeding completed successfully")
-        // Cleanly close MongoDB connection
+        
         if (mongoose.connection) {
           mongoose.disconnect()
           console.log("MongoDB connection closed")
@@ -71,8 +71,8 @@ function seedAdmin() {
       })
       .catch((err) => {
         console.error("❌ Admin seeding failed:", err.message)
-        // Don't exit here - let the process handle it naturally
-        // Cleanly close MongoDB connection
+        
+        
         if (mongoose.connection) {
           mongoose.disconnect()
           console.log("MongoDB connection closed")
@@ -85,14 +85,14 @@ function seedAdmin() {
 
 async function seedAdminLogic() {
   try {
-    // Normalize email (same as in auth controller)
+    
     const normalizedEmail = adminEmail.toLowerCase().trim()
 
-    // Check if user with this email already exists
+    
     const existingUser = await User.findOne({ email: normalizedEmail })
 
     if (existingUser) {
-      // User exists, ensure role is admin
+      
       if (existingUser.role !== "admin") {
         console.log(`User ${normalizedEmail} exists but role is '${existingUser.role}'. Updating to 'admin'...`)
         existingUser.role = "admin"
@@ -102,14 +102,14 @@ async function seedAdminLogic() {
         console.log(`✓ Admin user ${normalizedEmail} already exists with correct role`)
       }
 
-      // Note: We intentionally do NOT update the password if the user already exists
-      // to avoid locking out existing admin users who may have changed their password
+      
+      
       console.log("ℹ️  Password for existing admin user left unchanged (for security)")
     } else {
-      // Create new admin user
+      
       console.log(`Creating new admin user: ${normalizedEmail}`)
 
-      // Hash password using same mechanism as normal users (bcrypt with salt rounds 10)
+      
       const hashedPassword = await bcrypt.hash(adminPassword, 10)
 
       const adminUser = await User.create({
@@ -134,7 +134,7 @@ async function seedAdminLogic() {
   }
 }
 
-// Run the seeding function
+
 seedAdmin()
   .then(success => {
     process.exit(success ? 0 : 1)

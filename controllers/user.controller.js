@@ -6,14 +6,14 @@ const jwt = require("jsonwebtoken")
 const { sendWelcomeEmail } = require("../services/email.service")
 const Booking = require("../models/Booking.model")
 
-// @desc    Register a new user
-// @route   POST /api/users/register
-// @access  Public
+
+
+
 const registerUser = async (req, res) => {
   try {
     const { name, email, password } = req.body
 
-    // Validate required fields
+    
     if (typeof name !== "string" || !name.trim() || !email || !password) {
       return res.status(400).json({
         success: false,
@@ -21,7 +21,7 @@ const registerUser = async (req, res) => {
       })
     }
 
-    // Validate name length
+    
     const trimmedName = name.trim()
     if (trimmedName.length < 2) {
       return res.status(400).json({
@@ -37,7 +37,7 @@ const registerUser = async (req, res) => {
       })
     }
 
-    // Validate email format
+    
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(email)) {
       return res.status(400).json({
@@ -46,7 +46,7 @@ const registerUser = async (req, res) => {
       })
     }
 
-    // Validate password length
+    
     if (password.length < 6) {
       return res.status(400).json({
         success: false,
@@ -54,10 +54,10 @@ const registerUser = async (req, res) => {
       })
     }
 
-    // Normalize email
+    
     const normalizedEmail = email.toLowerCase().trim()
 
-    // Check if user already exists
+    
     const userExists = await User.findOne({ email: normalizedEmail })
     if (userExists) {
       return res.status(409).json({
@@ -66,10 +66,10 @@ const registerUser = async (req, res) => {
       })
     }
 
-    // Hash password
+    
     const hashedPassword = await bcrypt.hash(password, 10)
 
-    // Create user — role is always "user" on public registration (ignoring req.body.role)
+    
     const user = await User.create({
       name: trimmedName,
       email: normalizedEmail,
@@ -89,14 +89,14 @@ const registerUser = async (req, res) => {
       })
     }
 
-    // Generate JWT token
+    
     const token = jwt.sign(
       { id: user._id, role: user.role, authVersion: user.authVersion || 0 },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     )
 
-    // Return user info and token — never return password
+    
     res.status(201).json({
       success: true,
       message: "Account created successfully",
@@ -123,14 +123,14 @@ const registerUser = async (req, res) => {
   }
 }
 
-// @desc    Login user and get token
-// @route   POST /api/users/login
-// @access  Public
+
+
+
 const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body
 
-    // Validate required fields
+    
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -145,13 +145,13 @@ const loginUser = async (req, res) => {
       })
     }
 
-    // Normalize email
+    
     const normalizedEmail = email.toLowerCase().trim()
 
-    // Find user by email
+    
     const user = await User.findOne({ email: normalizedEmail })
 
-    // Check user exists and password matches
+    
     if (!user || user.deletedAt || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({
         success: false,
@@ -159,14 +159,14 @@ const loginUser = async (req, res) => {
       })
     }
 
-    // Generate JWT token
+    
     const token = jwt.sign(
       { id: user._id, role: user.role, authVersion: user.authVersion || 0 },
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     )
 
-    // Return user info and token — never return password
+    
     res.status(200).json({
       success: true,
       message: "Login successful",
@@ -201,9 +201,9 @@ const loginUser = async (req, res) => {
   }
 }
 
-// @desc    Get current logged-in user profile
-// @route   GET /api/users/me
-// @access  Private
+
+
+
 const getCurrentUser = (req, res) => {
   try {
     res.status(200).json({

@@ -2,21 +2,21 @@ const mongoose = require("mongoose")
 const Screen = require("../models/Screen.model")
 const Showtime = require("../models/Showtime.model")
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 
 const VALID_SCREEN_TYPES = ["standard", "vip"]
 const VALID_SCREEN_STATUSES = ["active", "inactive"]
 
-// ─── Create Screen ────────────────────────────────────────────────────────────
 
-// @desc    Create a new cinema screen/hall
-// @route   POST /api/screens
-// @access  Admin
+
+
+
+
 const createScreen = async (req, res) => {
   try {
     const { name, screenType, totalRows, seatsPerRow } = req.body
 
-    // ── Validation ──
+    
     if (!name || !String(name).trim()) {
       return res.status(400).json({ success: false, message: "Screen name is required" })
     }
@@ -47,13 +47,13 @@ const createScreen = async (req, res) => {
       })
     }
 
-    // ── Duplicate name check ──
+    
     const existing = await Screen.findOne({ name: String(name).trim() })
     if (existing) {
       return res.status(409).json({ success: false, message: "A screen with this name already exists" })
     }
 
-    // ── Create — totalSeats is calculated by the pre-save hook ──
+    
     const screen = new Screen({
       name: String(name).trim(),
       screenType: screenType || "standard",
@@ -83,11 +83,11 @@ const createScreen = async (req, res) => {
   }
 }
 
-// ─── Get All Screens ──────────────────────────────────────────────────────────
 
-// @desc    List all cinema screens
-// @route   GET /api/screens
-// @access  Admin
+
+
+
+
 const getAllScreens = async (req, res) => {
   try {
     const screens = await Screen.find().sort({ createdAt: -1 })
@@ -103,11 +103,11 @@ const getAllScreens = async (req, res) => {
   }
 }
 
-// ─── Get Single Screen ────────────────────────────────────────────────────────
 
-// @desc    Get a single screen by ID
-// @route   GET /api/screens/:id
-// @access  Admin
+
+
+
+
 const getScreenById = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -126,11 +126,11 @@ const getScreenById = async (req, res) => {
   }
 }
 
-// ─── Update Screen ────────────────────────────────────────────────────────────
 
-// @desc    Update screen details
-// @route   PUT /api/screens/:id
-// @access  Admin
+
+
+
+
 const updateScreen = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -139,7 +139,7 @@ const updateScreen = async (req, res) => {
 
     const { name, screenType, totalRows, seatsPerRow, status } = req.body
 
-    // At least one field required
+    
     if (
       name === undefined &&
       screenType === undefined &&
@@ -153,17 +153,17 @@ const updateScreen = async (req, res) => {
       })
     }
 
-    // Fetch current screen so we can safely recalculate totalSeats
+    
     const screen = await Screen.findById(req.params.id)
     if (!screen) {
       return res.status(404).json({ success: false, message: "Screen not found" })
     }
 
-    // ── Validate and apply each field ──
+    
     if (name !== undefined) {
       const trimmed = String(name).trim()
       if (!trimmed) return res.status(400).json({ success: false, message: "Screen name cannot be empty" })
-      // Check for duplicate name (excluding current screen)
+      
       const dup = await Screen.findOne({ name: trimmed, _id: { $ne: req.params.id } })
       if (dup) return res.status(409).json({ success: false, message: "A screen with this name already exists" })
       screen.name = trimmed
@@ -205,7 +205,7 @@ const updateScreen = async (req, res) => {
       screen.status = status
     }
 
-    // Recalculate totalSeats (pre-save hook also does this, but explicit is clear)
+    
     screen.totalSeats = screen.totalRows * screen.seatsPerRow
 
     await screen.save()
@@ -221,11 +221,11 @@ const updateScreen = async (req, res) => {
   }
 }
 
-// ─── Delete Screen ────────────────────────────────────────────────────────────
 
-// @desc    Delete a screen — blocked if future active showtimes exist
-// @route   DELETE /api/screens/:id
-// @access  Admin
+
+
+
+
 const deleteScreen = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -237,7 +237,7 @@ const deleteScreen = async (req, res) => {
       return res.status(404).json({ success: false, message: "Screen not found" })
     }
 
-    // Check for future scheduled showtimes using this screen
+    
     const now = new Date()
     const activeShowtimes = await Showtime.countDocuments({
       screen: req.params.id,

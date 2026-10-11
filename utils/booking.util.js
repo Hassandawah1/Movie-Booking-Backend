@@ -2,19 +2,12 @@ const crypto = require("crypto")
 const Booking = require("../models/Booking.model")
 const Showtime = require("../models/Showtime.model")
 
-/**
- * Generate a unique booking reference
- * Format: MB-<timestamp>-<hex> (e.g. MB-1712419200000-A1B2C3)
- */
+
 const generateBookingReference = () => {
   return `MB-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`
 }
 
-/**
- * Validate seat label against screen dimensions
- * Rows: A-Z (1 to totalRows)
- * Columns: 1 to seatsPerRow
- */
+
 const isValidSeatLabel = (seatStr, totalRows, seatsPerRow) => {
   if (typeof seatStr !== "string") return false
   const match = seatStr.trim().toUpperCase().match(/^([A-Z])([1-9]\d*)$/)
@@ -23,7 +16,7 @@ const isValidSeatLabel = (seatStr, totalRows, seatsPerRow) => {
   const rowLetter = match[1]
   const colNumber = parseInt(match[2], 10)
 
-  const rowIndex = rowLetter.charCodeAt(0) - 65 + 1 // A -> 1, B -> 2, etc.
+  const rowIndex = rowLetter.charCodeAt(0) - 65 + 1 
 
   if (rowIndex < 1 || rowIndex > totalRows) return false
   if (colNumber < 1 || colNumber > seatsPerRow) return false
@@ -31,10 +24,7 @@ const isValidSeatLabel = (seatStr, totalRows, seatsPerRow) => {
   return true
 }
 
-/**
- * Lazy cleanup: Releases expired pending-payment bookings for a specific showtime
- * and pulls their seats from Showtime.bookedSeats
- */
+
 const releaseExpiredBookings = async (showtimeId) => {
   try {
     const now = new Date()
@@ -60,13 +50,13 @@ const releaseExpiredBookings = async (showtimeId) => {
       }
     }
 
-    // Mark bookings as expired
+    
     await Booking.updateMany(
       { _id: { $in: bookingIds } },
       { $set: { bookingStatus: "expired" } }
     )
 
-    // Remove released seats from Showtime.bookedSeats
+    
     if (expiredSeats.length > 0) {
       await Showtime.updateOne(
         { _id: showtimeId },
@@ -78,9 +68,7 @@ const releaseExpiredBookings = async (showtimeId) => {
   }
 }
 
-/**
- * Generate full seat layout grid with availability status
- */
+
 const generateSeatLayout = (screen, showtime) => {
   const bookedSet = new Set(showtime.bookedSeats || [])
   const rows = []

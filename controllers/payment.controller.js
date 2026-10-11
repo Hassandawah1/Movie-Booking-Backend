@@ -5,7 +5,7 @@ const Booking = require("../models/Booking.model")
 const Showtime = require("../models/Showtime.model")
 const { sendBookingConfirmationEmail } = require("../services/email.service")
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 
 const getPaystackConfig = () => {
   const secret = process.env.PAYSTACK_SECRET_KEY
@@ -13,27 +13,19 @@ const getPaystackConfig = () => {
   return { secret, baseUrl }
 }
 
-// ─── Payment reference helpers ───────────────────────────────────────────────
 
-// Allowed "no newer attempt" window before a customer may start a fresh
-// transaction on the same booking.
+
+
+
 const INITIALIZATION_COOLDOWN_MS = 5 * 60 * 1000
 
-// Mirrors the reference format generated at initialization:
-//   PAY-<bookingReference>-<hex>
+
+
 const PAYMENT_REF_PREFIX = "PAY-"
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-/**
- * Find the booking that a payment reference belongs to.
- *
- * The booking stores only the MOST RECENT Paystack reference, so a reference
- * from an earlier initialization attempt would otherwise be orphaned and its
- * callback would 404 even though the customer had really paid. Because every
- * reference is built as `PAY-<bookingReference>-<hex>`, a stale reference can
- * still be matched back to its booking by substring.
- */
+
 const findBookingByPaymentReference = async (cleanRef, populateQuery) => {
   let query = Booking.findOne({
     $or: [{ paymentReference: cleanRef }, { bookingReference: cleanRef }]
@@ -44,8 +36,8 @@ const findBookingByPaymentReference = async (cleanRef, populateQuery) => {
   const exact = await query
   if (exact) return exact
 
-  // Only attempt substring recovery for references we generated ourselves,
-  // so arbitrary strings cannot be used to probe other customers' bookings.
+  
+  
   if (!cleanRef.startsWith(PAYMENT_REF_PREFIX)) return null
 
   let fallback = Booking.findOne({
@@ -57,11 +49,7 @@ const findBookingByPaymentReference = async (cleanRef, populateQuery) => {
   return fallback
 }
 
-/**
- * Claims the right to start a new Paystack transaction for this booking.
- * Returns true for the first caller only, so two concurrent requests (double
- * click, refreshed tab, React StrictMode) cannot open two live transactions.
- */
+
 const claimPaymentInitialization = async (bookingId) => {
   const claimed = await Booking.findOneAndUpdate(
     {
@@ -168,11 +156,11 @@ const trySendConfirmationEmail = async (booking) => {
   }
 }
 
-// ─── Initialize Payment ──────────────────────────────────────────────────────
 
-// @desc    Initialize a Paystack transaction for a pending booking
-// @route   POST /api/payments/initialize/:bookingId
-// @access  Private (Owner only)
+
+
+
+
 const initializePayment = async (req, res) => {
   let claimBookingId = null
 
@@ -193,7 +181,7 @@ const initializePayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found" })
     }
 
-    // Ownership check — customers cannot pay for other people's bookings
+    
     const isOwner = booking.user && booking.user._id.toString() === req.user._id.toString()
     if (!isOwner) {
       return res.status(403).json({
@@ -202,7 +190,7 @@ const initializePayment = async (req, res) => {
       })
     }
 
-    // Status checks
+    
     if (booking.bookingStatus === "confirmed" || booking.paymentStatus === "paid") {
       return res.status(400).json({
         success: false,
@@ -217,13 +205,13 @@ const initializePayment = async (req, res) => {
       })
     }
 
-    // Check expiration
+    
     const now = new Date()
     if (booking.expiresAt && booking.expiresAt < now) {
       booking.bookingStatus = "expired"
       await booking.save()
 
-      // Release seats from showtime
+      
       const seatNumbers = Array.isArray(booking.seats)
         ? booking.seats.map((s) => s.seatNumber)
         : []
@@ -247,10 +235,10 @@ const initializePayment = async (req, res) => {
       })
     }
 
-    // Calculate amount in kobo (Paystack expects amount in lowest currency unit: 1 Naira = 100 kobo)
+    
     const amountInKobo = Math.round(booking.totalAmount * 100)
 
-    // Customer email
+    
     const customerEmail = req.user.email || booking.user?.email
     if (!customerEmail) {
       return res.status(400).json({
@@ -259,14 +247,14 @@ const initializePayment = async (req, res) => {
       })
     }
 
-    // Unique payment reference: PAY-<bookingReference>-<hex>
+    
     const paymentRef = `PAY-${booking.bookingReference}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`
 
-    // ── Duplicate initialization guard ──
-    // If a transaction was already opened for this booking very recently, reuse
-    // it instead of opening a second one. Two live transactions would strand the
-    // first reference (the booking can only remember one), so a customer paying
-    // on the original checkout page could never be matched back to the booking.
+    
+    
+    
+    
+    
     const existingRef = booking.paymentReference
     const recentlyInitialized =
       existingRef &&
@@ -292,8 +280,8 @@ const initializePayment = async (req, res) => {
       })
     }
 
-    // Atomically claim this initialization so concurrent requests cannot both
-    // proceed to create a Paystack transaction.
+    
+    
     const claimed = await claimPaymentInitialization(booking._id)
     claimBookingId = booking._id
     if (!claimed) {
@@ -326,7 +314,7 @@ const initializePayment = async (req, res) => {
       })
     }
 
-    // Call Paystack Initialize Endpoint
+    
     const paystackResponse = await axios.post(
       `${baseUrl}/transaction/initialize`,
       {
@@ -360,7 +348,7 @@ const initializePayment = async (req, res) => {
 
     const { authorization_url, access_code, reference } = paystackResponse.data.data
 
-    // Persist payment reference on booking
+    
     booking.paymentReference = reference || paymentRef
     booking.paymentAccessCode = access_code || null
     booking.paymentInitializingAt = null
@@ -407,11 +395,11 @@ const initializePayment = async (req, res) => {
   }
 }
 
-// ─── Verify Payment ──────────────────────────────────────────────────────────
 
-// @desc    Verify Paystack transaction status and confirm booking
-// @route   GET /api/payments/verify/:reference
-// @access  Private (Owner or Admin)
+
+
+
+
 const verifyPayment = async (req, res) => {
   try {
     const { reference } = req.params
@@ -422,9 +410,9 @@ const verifyPayment = async (req, res) => {
 
     const cleanRef = String(reference).trim()
 
-    // Find booking by paymentReference (or fallback matching bookingReference).
-    // A reference from an earlier, superseded initialization attempt is matched
-    // back to its booking by substring so a completed payment is never orphaned.
+    
+    
+    
     const booking = await findBookingByPaymentReference(cleanRef, [
       { path: "user", select: "name email" },
       { path: "movie", select: "title posterUrl runtime" },
@@ -439,7 +427,7 @@ const verifyPayment = async (req, res) => {
       })
     }
 
-    // Ownership check (Admins can verify any payment)
+    
     const isOwner = booking.user && booking.user._id.toString() === req.user._id.toString()
     const isAdmin = req.user.role === "admin"
 
@@ -450,9 +438,9 @@ const verifyPayment = async (req, res) => {
       })
     }
 
-    // ── Idempotent Check: If already confirmed & paid, return current state ──
+    
     if (booking.paymentStatus === "paid" && booking.bookingStatus === "confirmed") {
-      // Ensure confirmation email was triggered if missed earlier
+      
       if (!booking.confirmationEmailSent) {
         await trySendConfirmationEmail(booking)
       }
@@ -475,7 +463,7 @@ const verifyPayment = async (req, res) => {
       })
     }
 
-    // Call Paystack Verify Endpoint
+    
     const { secret, baseUrl } = getPaystackConfig()
     if (!secret) {
       return res.status(500).json({
@@ -501,12 +489,12 @@ const verifyPayment = async (req, res) => {
       })
     }
 
-    // Verify transaction status from Paystack
+    
     if (paystackData.status !== "success") {
       booking.paymentStatus = "failed"
-      // Record WHY, so the UI can distinguish "the customer abandoned checkout"
-      // from "the gateway declined the payment". Paystack reports an unfinished
-      // checkout as "abandoned", which is not a declined payment.
+      
+      
+      
       booking.paymentFailureReason = paystackData.status
       await booking.save()
 
@@ -522,7 +510,7 @@ const verifyPayment = async (req, res) => {
       })
     }
 
-    // ── Critical Amount Verification (Never Trust Client Amount) ──
+    
     const expectedKobo = Math.round(booking.totalAmount * 100)
     const paidKobo = paystackData.amount
 
@@ -545,12 +533,12 @@ const verifyPayment = async (req, res) => {
       })
     }
 
-    // ── Ensure seats stay permanently locked in Showtime ──
+    
     const showtimeId = booking.showtime?._id || booking.showtime
     const seatNumbers = Array.isArray(booking.seats) ? booking.seats.map((s) => s.seatNumber) : []
 
     if (showtimeId && seatNumbers.length > 0) {
-      // Check for seat conflicts if payment is verified after booking expired/cancelled
+      
       if (booking.bookingStatus === "expired" || booking.bookingStatus === "cancelled") {
         const conflictingBooking = await Booking.findOne({
           showtime: showtimeId,
@@ -574,7 +562,7 @@ const verifyPayment = async (req, res) => {
       )
     }
 
-    // ── Update Booking to Confirmed & Paid ──
+    
     booking.paymentStatus = "paid"
     booking.bookingStatus = "confirmed"
     booking.paidAt = paystackData.paid_at ? new Date(paystackData.paid_at) : new Date()
@@ -585,7 +573,7 @@ const verifyPayment = async (req, res) => {
 
     await booking.save()
 
-    // ── Send Booking Confirmation Email (Non-blocking failure) ──
+    
     const emailSent = await trySendConfirmationEmail(booking)
 
     return res.status(200).json({
@@ -620,11 +608,11 @@ const verifyPayment = async (req, res) => {
   }
 }
 
-// ─── Get Payment Status for a Booking ────────────────────────────────────────
 
-// @desc    Get payment and confirmation status for a specific booking
-// @route   GET /api/payments/booking/:bookingId
-// @access  Private (Owner or Admin)
+
+
+
+
 const getBookingPaymentStatus = async (req, res) => {
   try {
     const { bookingId } = req.params
@@ -676,11 +664,11 @@ const getBookingPaymentStatus = async (req, res) => {
   }
 }
 
-// ─── Paystack Webhook Handler ────────────────────────────────────────────────
 
-// @desc    Handle Paystack Webhook events (e.g. charge.success)
-// @route   POST /api/payments/webhook
-// @access  Public (Validated with Paystack HMAC-SHA512 Signature)
+
+
+
+
 const paystackWebhook = async (req, res) => {
   try {
     const paystackSignature = req.headers["x-paystack-signature"]
@@ -690,7 +678,7 @@ const paystackWebhook = async (req, res) => {
       return res.status(401).json({ success: false, message: "Missing webhook signature or secret" })
     }
 
-    // Verify HMAC-SHA512 signature using raw request body
+    
     const payload = req.rawBody ? req.rawBody : JSON.stringify(req.body)
     const expectedSignature = crypto
       .createHmac("sha512", secret)
@@ -704,15 +692,15 @@ const paystackWebhook = async (req, res) => {
 
     const event = req.body
 
-    // Handle charge.success event
+    
     if (event.event === "charge.success") {
       const data = event.data
       const reference = data.reference
       const paidKobo = data.amount
 
       if (reference) {
-        // Same substring recovery as verifyPayment: a webhook for an earlier
-        // initialization attempt must still be able to confirm its booking.
+        
+        
         const booking = await findBookingByPaymentReference(reference, [
           { path: "user", select: "name email" },
           { path: "movie", select: "title posterUrl" },
@@ -721,12 +709,12 @@ const paystackWebhook = async (req, res) => {
         ])
 
         if (booking) {
-          // Idempotency: skip if already confirmed and paid
+          
           if (booking.bookingStatus !== "confirmed" || booking.paymentStatus !== "paid") {
             const expectedKobo = Math.round(booking.totalAmount * 100)
 
             if (paidKobo === expectedKobo) {
-              // Confirm booking
+              
               booking.paymentStatus = "paid"
               booking.bookingStatus = "confirmed"
               booking.paidAt = data.paid_at ? new Date(data.paid_at) : new Date()
@@ -736,7 +724,7 @@ const paystackWebhook = async (req, res) => {
 
               await booking.save()
 
-              // Lock seats permanently
+              
               const showtimeId = booking.showtime?._id || booking.showtime
               const seatNumbers = Array.isArray(booking.seats)
                 ? booking.seats.map((s) => s.seatNumber)
@@ -777,7 +765,7 @@ const paystackWebhook = async (req, res) => {
       }
     }
 
-    // Always acknowledge webhook with 200 OK
+    
     return res.status(200).json({ status: "success" })
   } catch (err) {
     console.error("paystackWebhook error:", {

@@ -55,15 +55,15 @@ const movieSchema = new mongoose.Schema(
       default: ""
     },
 
-    // Controls where this movie sits in our cinema
-    // Ticket prices live on Showtime (Phase 4), NOT here
+    
+    
     status: {
       type: String,
       enum: ["coming-soon", "now-showing", "ended"],
       default: "coming-soon"
     },
 
-    // Admin who added this movie to our cinema
+    
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

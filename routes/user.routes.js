@@ -9,11 +9,11 @@ const {
 } = require("../controllers/user.controller")
 const authenticateUser = require("../middleware/auth.middleware")
 
-// Public routes
+
 router.post("/register", registerUser)
 router.post("/login", loginUser)
 
-// Protected routes
+
 router.get("/me", authenticateUser, getCurrentUser)
 router.put("/me/password", authenticateUser, changePassword)
 router.delete("/me", authenticateUser, deleteAccount)

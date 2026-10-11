@@ -6,21 +6,21 @@ const Booking = require("../models/Booking.model")
 const { releaseExpiredBookings, generateSeatLayout } = require("../utils/booking.util")
 const { sendShowtimeCancellationEmail } = require("../services/email.service")
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 
 const VALID_STATUSES = ["scheduled", "cancelled", "completed"]
-const MOVIE_STATUSES_ALLOWED = ["coming-soon", "now-showing"] // "ended" is blocked
+const MOVIE_STATUSES_ALLOWED = ["coming-soon", "now-showing"] 
 
-// Validate "HH:MM" 24-hour format
+
 const isValidTime = (str) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(str)
 
-// Convert "HH:MM" to total minutes since midnight
+
 const timeToMinutes = (str) => {
   const [h, m] = str.split(":").map(Number)
   return h * 60 + m
 }
 
-// Add minutes to a "HH:MM" string and return new "HH:MM"
+
 const addMinutesToTime = (str, minutes) => {
   const total = timeToMinutes(str) + minutes
   const h = Math.floor(total / 60) % 24
@@ -28,31 +28,23 @@ const addMinutesToTime = (str, minutes) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
 }
 
-// Normalize a date to midnight UTC for consistent day comparisons
+
 const toMidnight = (date) => {
   const d = new Date(date)
   d.setUTCHours(0, 0, 0, 0)
   return d
 }
 
-// Get today at midnight (local machine midnight, same-day showtimes allowed)
+
 const todayMidnight = () => {
   const d = new Date()
   d.setHours(0, 0, 0, 0)
   return d
 }
 
-// ─── Conflict Detection ───────────────────────────────────────────────────────
 
-/**
- * Check whether a proposed showtime conflicts with existing scheduled showtimes
- * on the same screen and date.
- *
- * If movie.runtime is available: check for time-range overlaps.
- * Otherwise: only check exact startTime collision.
- *
- * excludeId — pass an existing showtime _id to ignore it (for updates)
- */
+
+
 const hasSchedulingConflict = async (screenId, showDate, startTime, runtimeMinutes, excludeId) => {
   const dayStart = toMidnight(showDate)
   const dayEnd = new Date(dayStart)
@@ -71,21 +63,21 @@ const hasSchedulingConflict = async (screenId, showDate, startTime, runtimeMinut
   if (existingShowtimes.length === 0) return false
 
   const proposedStart = timeToMinutes(startTime)
-  // If runtime is known, proposed end is start + runtime; otherwise treat it as 0-duration (exact match only)
+  
   const proposedEnd = runtimeMinutes ? proposedStart + runtimeMinutes : proposedStart
 
   for (const st of existingShowtimes) {
     const existingStart = timeToMinutes(st.startTime)
 
     if (runtimeMinutes && st.endTime) {
-      // Full overlap check — both have runtimes
+      
       const existingEnd = timeToMinutes(st.endTime)
-      // Overlap if: proposed starts before existing ends AND proposed ends after existing starts
+      
       if (proposedStart < existingEnd && proposedEnd > existingStart) {
         return true
       }
     } else {
-      // Fallback: exact startTime collision
+      
       if (proposedStart === existingStart) return true
     }
   }
@@ -93,16 +85,16 @@ const hasSchedulingConflict = async (screenId, showDate, startTime, runtimeMinut
   return false
 }
 
-// ─── Create Showtime ──────────────────────────────────────────────────────────
 
-// @desc    Create a new showtime
-// @route   POST /api/showtimes
-// @access  Admin
+
+
+
+
 const createShowtime = async (req, res) => {
   try {
     const { movieId, screenId, showDate, startTime, standardPrice, vipPrice } = req.body
 
-    // ── Required field validation ──
+    
     if (!movieId) return res.status(400).json({ success: false, message: "movieId is required" })
     if (!screenId) return res.status(400).json({ success: false, message: "screenId is required" })
     if (!showDate) return res.status(400).json({ success: false, message: "showDate is required" })
@@ -111,7 +103,7 @@ const createShowtime = async (req, res) => {
       return res.status(400).json({ success: false, message: "standardPrice is required" })
     }
 
-    // ── ObjectId validation ──
+    
     if (!mongoose.isValidObjectId(movieId)) {
       return res.status(400).json({ success: false, message: "Invalid movieId format" })
     }
@@ -119,24 +111,24 @@ const createShowtime = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid screenId format" })
     }
 
-    // ── Date validation ──
+    
     const parsedDate = new Date(showDate)
     if (isNaN(parsedDate.getTime())) {
       return res.status(400).json({ success: false, message: "Invalid showDate — use YYYY-MM-DD format" })
     }
 
-    // No past dates — compare at day level
+    
     const showDay = toMidnight(parsedDate)
     if (showDay < todayMidnight()) {
       return res.status(400).json({ success: false, message: "Show date cannot be in the past" })
     }
 
-    // ── Time validation ──
+    
     if (!isValidTime(startTime)) {
       return res.status(400).json({ success: false, message: "Invalid startTime — use HH:MM format (24-hour)" })
     }
 
-    // ── Price validation ──
+    
     const stdPrice = Number(standardPrice)
     if (isNaN(stdPrice) || stdPrice < 0) {
       return res.status(400).json({ success: false, message: "standardPrice must be a non-negative number" })
@@ -150,7 +142,7 @@ const createShowtime = async (req, res) => {
       }
     }
 
-    // ── Movie existence and status check ──
+    
     const movie = await Movie.findById(movieId)
     if (!movie) {
       return res.status(404).json({ success: false, message: "Movie not found" })
@@ -159,7 +151,7 @@ const createShowtime = async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot create a showtime for a movie marked as ended" })
     }
 
-    // ── Screen existence and active check ──
+    
     const screen = await Screen.findById(screenId)
     if (!screen) {
       return res.status(404).json({ success: false, message: "Screen not found" })
@@ -168,8 +160,8 @@ const createShowtime = async (req, res) => {
       return res.status(400).json({ success: false, message: "The selected screen is not active" })
     }
 
-    // ── Scheduling conflict check ──
-    // Use movie runtime if available for smarter overlap detection
+    
+    
     const runtimeMinutes = movie.runtime || null
     const conflict = await hasSchedulingConflict(screenId, parsedDate, startTime, runtimeMinutes, null)
     if (conflict) {
@@ -179,13 +171,13 @@ const createShowtime = async (req, res) => {
       })
     }
 
-    // ── Calculate endTime if runtime is known ──
+    
     let endTime = null
     if (runtimeMinutes) {
       endTime = addMinutesToTime(startTime, runtimeMinutes)
     }
 
-    // ── Create showtime ──
+    
     const showtime = new Showtime({
       movie: movieId,
       screen: screenId,
@@ -200,7 +192,7 @@ const createShowtime = async (req, res) => {
 
     await showtime.save()
 
-    // Populate for response
+    
     await showtime.populate([
       { path: "movie", select: "title posterUrl runtime status" },
       { path: "screen", select: "name screenType totalSeats" }
@@ -217,16 +209,16 @@ const createShowtime = async (req, res) => {
   }
 }
 
-// ─── Get All Showtimes ────────────────────────────────────────────────────────
 
-// @desc    List all showtimes — supports filtering by movieId, screenId, date, status
-// @route   GET /api/showtimes
-// @access  Public
+
+
+
+
 const getAllShowtimes = async (req, res) => {
   try {
     const filter = {}
 
-    // Filter by movie
+    
     if (req.query.movieId) {
       if (!mongoose.isValidObjectId(req.query.movieId)) {
         return res.status(400).json({ success: false, message: "Invalid movieId filter" })
@@ -234,7 +226,7 @@ const getAllShowtimes = async (req, res) => {
       filter.movie = req.query.movieId
     }
 
-    // Filter by screen
+    
     if (req.query.screenId) {
       if (!mongoose.isValidObjectId(req.query.screenId)) {
         return res.status(400).json({ success: false, message: "Invalid screenId filter" })
@@ -242,7 +234,7 @@ const getAllShowtimes = async (req, res) => {
       filter.screen = req.query.screenId
     }
 
-    // Filter by date — match all showtimes on that calendar day
+    
     if (req.query.date) {
       const d = new Date(req.query.date)
       if (isNaN(d.getTime())) {
@@ -254,7 +246,7 @@ const getAllShowtimes = async (req, res) => {
       filter.showDate = { $gte: dayStart, $lt: dayEnd }
     }
 
-    // Filter by status
+    
     if (req.query.status) {
       if (!VALID_STATUSES.includes(req.query.status)) {
         return res.status(400).json({
@@ -281,11 +273,11 @@ const getAllShowtimes = async (req, res) => {
   }
 }
 
-// ─── Get Showtimes for a Movie ────────────────────────────────────────────────
 
-// @desc    Get upcoming scheduled showtimes for a specific movie
-// @route   GET /api/showtimes/movie/:movieId
-// @access  Public
+
+
+
+
 const getShowtimesForMovie = async (req, res) => {
   try {
     const { movieId } = req.params
@@ -294,13 +286,13 @@ const getShowtimesForMovie = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid movieId format" })
     }
 
-    // Verify movie exists
+    
     const movie = await Movie.findById(movieId)
     if (!movie) {
       return res.status(404).json({ success: false, message: "Movie not found" })
     }
 
-    // Only upcoming scheduled showtimes
+    
     const now = todayMidnight()
     const showtimes = await Showtime.find({
       movie: movieId,
@@ -310,7 +302,7 @@ const getShowtimesForMovie = async (req, res) => {
       .populate("screen", "id name screenType totalSeats")
       .sort({ showDate: 1, startTime: 1 })
 
-    // Format response as per spec
+    
     const formatted = showtimes.map((st) => ({
       id: st._id,
       date: st.showDate.toISOString().split("T")[0],
@@ -344,11 +336,11 @@ const getShowtimesForMovie = async (req, res) => {
   }
 }
 
-// ─── Get Single Showtime ──────────────────────────────────────────────────────
 
-// @desc    Get a single showtime with full movie and screen details
-// @route   GET /api/showtimes/:id
-// @access  Public
+
+
+
+
 const getShowtimeById = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -370,11 +362,11 @@ const getShowtimeById = async (req, res) => {
   }
 }
 
-// ─── Update Showtime ──────────────────────────────────────────────────────────
 
-// @desc    Update showtime details or status
-// @route   PUT /api/showtimes/:id
-// @access  Admin
+
+
+
+
 const updateShowtime = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -393,7 +385,7 @@ const updateShowtime = async (req, res) => {
     const { movieId, screenId, showDate, startTime, standardPrice, vipPrice, status } = req.body
     const shouldNotifyCancellation = showtime.status === "scheduled" && status === "cancelled"
 
-    // At least one field required
+    
     if (
       movieId === undefined &&
       screenId === undefined &&
@@ -409,7 +401,7 @@ const updateShowtime = async (req, res) => {
       })
     }
 
-    // ── Validate and stage changes ──
+    
     let newMovieId = showtime.movie.toString()
     let newScreenId = showtime.screen.toString()
     let newShowDate = showtime.showDate
@@ -499,9 +491,9 @@ const updateShowtime = async (req, res) => {
       }
     }
 
-    // ── Run conflict check if scheduling-related fields changed ──
+    
     if (recalculateConflict) {
-      // If movie wasn't updated, fetch runtime from current movie
+      
       if (movieId === undefined) {
         const currentMovie = await Movie.findById(newMovieId)
         runtimeMinutes = currentMovie?.runtime || null
@@ -512,7 +504,7 @@ const updateShowtime = async (req, res) => {
         newShowDate,
         newStartTime,
         runtimeMinutes,
-        req.params.id // exclude current showtime
+        req.params.id 
       )
       if (conflict) {
         return res.status(409).json({
@@ -521,7 +513,7 @@ const updateShowtime = async (req, res) => {
         })
       }
 
-      // Recalculate endTime
+      
       showtime.endTime = runtimeMinutes ? addMinutesToTime(newStartTime, runtimeMinutes) : null
     }
 
@@ -583,11 +575,11 @@ const updateShowtime = async (req, res) => {
   }
 }
 
-// ─── Get Showtime Seat Availability ──────────────────────────────────────────
 
-// @desc    Get real-time seat availability and layout for a showtime
-// @route   GET /api/showtimes/:showtimeId/seats
-// @access  Public
+
+
+
+
 const getShowtimeSeats = async (req, res) => {
   try {
     const { showtimeId } = req.params
@@ -596,7 +588,7 @@ const getShowtimeSeats = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid showtime ID format" })
     }
 
-    // Lazy cleanup of any expired reservations for this showtime before calculating layout
+    
     await releaseExpiredBookings(showtimeId)
 
     const showtime = await Showtime.findById(showtimeId)
@@ -644,18 +636,18 @@ const getShowtimeSeats = async (req, res) => {
   }
 }
 
-// ─── Delete Showtime ──────────────────────────────────────────────────────────
 
-// @desc    Delete a showtime — blocked if active bookings exist
-// @route   DELETE /api/showtimes/:id
-// @access  Admin
+
+
+
+
 const deleteShowtime = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ success: false, message: "Invalid showtime ID format" })
     }
 
-    // Block deletion if active bookings exist
+    
     const activeBookings = await Booking.countDocuments({
       showtime: req.params.id,
       bookingStatus: { $in: ["pending-payment", "confirmed"] }

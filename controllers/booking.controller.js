@@ -11,16 +11,15 @@ const {
 } = require("../utils/booking.util")
 const { sendReservationEmail, sendCancellationEmail } = require("../services/email.service")
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const VALID_BOOKING_STATUSES = ["pending-payment", "confirmed", "cancelled", "expired"]
 const VALID_PAYMENT_STATUSES = ["unpaid", "paid", "failed", "refunded"]
 
-// ─── Create Booking ──────────────────────────────────────────────────────────
 
-// @desc    Reserve seats and create a pending booking
-// @route   POST /api/bookings
-// @access  Private (User & Admin)
+
+
+
+
 const createBooking = async (req, res) => {
   let reservedSeats = []
   let targetShowtimeId = null
@@ -28,7 +27,7 @@ const createBooking = async (req, res) => {
   try {
     const { showtimeId, seats } = req.body
 
-    // ── Input Validation ──
+    
     if (!showtimeId) {
       return res.status(400).json({ success: false, message: "showtimeId is required" })
     }
@@ -44,7 +43,7 @@ const createBooking = async (req, res) => {
       })
     }
 
-    // Normalize seat strings (support ["A1", "A2"] or [{ seatNumber: "A1" }])
+    
     const normalizedSeats = seats.map((s) => {
       if (typeof s === "string") return s.trim().toUpperCase()
       if (s && typeof s === "object" && typeof s.seatNumber === "string") {
@@ -60,7 +59,7 @@ const createBooking = async (req, res) => {
       })
     }
 
-    // Check for duplicates in request
+    
     const uniqueSeats = new Set(normalizedSeats)
     if (uniqueSeats.size !== normalizedSeats.length) {
       return res.status(400).json({
@@ -71,10 +70,10 @@ const createBooking = async (req, res) => {
 
     const requestedSeats = Array.from(uniqueSeats)
 
-    // ── Lazy Cleanup of Expired Reservations ──
+    
     await releaseExpiredBookings(showtimeId)
 
-    // ── Fetch Showtime, Screen, Movie ──
+    
     const showtime = await Showtime.findById(showtimeId)
       .populate("movie")
       .populate("screen")
@@ -90,7 +89,7 @@ const createBooking = async (req, res) => {
       })
     }
 
-    // Check if showtime has already started/passed
+    
     const showDateObj = new Date(showtime.showDate)
     const [startHour, startMin] = (showtime.startTime || "00:00").split(":").map(Number)
     showDateObj.setHours(startHour, startMin, 0, 0)
@@ -117,7 +116,7 @@ const createBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot book tickets for an ended movie" })
     }
 
-    // ── Validate requested seats exist within screen layout ──
+    
     for (const seat of requestedSeats) {
       if (!isValidSeatLabel(seat, screen.totalRows, screen.seatsPerRow)) {
         return res.status(400).json({
@@ -127,7 +126,7 @@ const createBooking = async (req, res) => {
       }
     }
 
-    // ── Server-Side Price Calculation (Never Trust Client Prices) ──
+    
     const ticketType = screen.screenType || "standard"
     const unitPrice =
       ticketType === "vip" && showtime.vipPrice != null
@@ -148,8 +147,8 @@ const createBooking = async (req, res) => {
       price: unitPrice
     }))
 
-    // ── Atomic Seat Locking (Double-Booking Prevention) ──
-    // Find showtime ONLY IF NONE of requestedSeats are currently in bookedSeats
+    
+    
     const updatedShowtime = await Showtime.findOneAndUpdate(
       {
         _id: showtimeId,
@@ -168,16 +167,16 @@ const createBooking = async (req, res) => {
       })
     }
 
-    // Track for rollback in catch block if Booking document creation fails
+    
     reservedSeats = requestedSeats
     targetShowtimeId = showtimeId
 
-    // ── Expiration & Reference ──
+    
     const holdMinutes = parseInt(process.env.BOOKING_HOLD_MINUTES, 10) || 10
     const expiresAt = new Date(Date.now() + holdMinutes * 60 * 1000)
     const bookingReference = generateBookingReference()
 
-    // ── Create Booking Document ──
+    
     const booking = new Booking({
       user: req.user._id,
       showtime: showtimeId,
@@ -193,7 +192,7 @@ const createBooking = async (req, res) => {
 
     await booking.save()
 
-    // Populate for clean response
+    
     await booking.populate([
       { path: "movie", select: "title posterUrl runtime rating" },
       { path: "screen", select: "name screenType totalSeats" },
@@ -236,7 +235,7 @@ const createBooking = async (req, res) => {
   } catch (err) {
     console.error("createBooking error:", err)
 
-    // Rollback reserved seats from showtime if booking document creation failed
+    
     if (targetShowtimeId && reservedSeats.length > 0) {
       try {
         await Showtime.updateOne(
@@ -252,11 +251,11 @@ const createBooking = async (req, res) => {
   }
 }
 
-// ─── Get Logged-in User Bookings ──────────────────────────────────────────────
 
-// @desc    Get all bookings for the authenticated user
-// @route   GET /api/bookings/my
-// @access  Private (User & Admin)
+
+
+
+
 const getMyBookings = async (req, res) => {
   try {
     const bookings = await Booking.find({ user: req.user._id })
@@ -276,11 +275,11 @@ const getMyBookings = async (req, res) => {
   }
 }
 
-// ─── Get Single Booking By ID ────────────────────────────────────────────────
 
-// @desc    Get single booking by ID (User can view own, Admin can view any)
-// @route   GET /api/bookings/:id
-// @access  Private
+
+
+
+
 const getBookingById = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -297,7 +296,7 @@ const getBookingById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found" })
     }
 
-    // Ownership check (Admins can view any booking)
+    
     const isOwner = booking.user && booking.user._id.toString() === req.user._id.toString()
     const isAdmin = req.user.role === "admin"
 
@@ -318,11 +317,11 @@ const getBookingById = async (req, res) => {
   }
 }
 
-// ─── Cancel Booking ──────────────────────────────────────────────────────────
 
-// @desc    Cancel an unpaid booking and release its seats
-// @route   PATCH /api/bookings/:id/cancel
-// @access  Private (User can cancel own, Admin can cancel any)
+
+
+
+
 const cancelBooking = async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -334,7 +333,7 @@ const cancelBooking = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found" })
     }
 
-    // Ownership check
+    
     const isOwner =
       booking.user &&
       (booking.user._id ? booking.user._id.toString() : booking.user.toString()) ===
@@ -348,7 +347,7 @@ const cancelBooking = async (req, res) => {
       })
     }
 
-    // If booking is paid or confirmed, block cancellation and require refund workflow
+    
     if (booking.bookingStatus === "confirmed" || booking.paymentStatus === "paid") {
       return res.status(409).json({
         success: false,
@@ -356,7 +355,7 @@ const cancelBooking = async (req, res) => {
       })
     }
 
-    // Only allow cancelling pending-payment bookings
+    
     if (booking.bookingStatus !== "pending-payment") {
       return res.status(400).json({
         success: false,
@@ -364,11 +363,11 @@ const cancelBooking = async (req, res) => {
       })
     }
 
-    // Update status
+    
     booking.bookingStatus = "cancelled"
     await booking.save()
 
-    // Release seats from showtime
+    
     const seatNumbers = booking.seats.map((s) => s.seatNumber)
     if (seatNumbers.length > 0) {
       await Showtime.updateOne(
@@ -415,16 +414,16 @@ const cancelBooking = async (req, res) => {
   }
 }
 
-// ─── Get All Bookings (Admin) ────────────────────────────────────────────────
 
-// @desc    List all bookings with optional filters, search, and pagination
-// @route   GET /api/bookings
-// @access  Admin
+
+
+
+
 const getAllBookings = async (req, res) => {
   try {
     const filter = {}
 
-    // Filter by bookingStatus
+    
     if (req.query.bookingStatus) {
       if (!VALID_BOOKING_STATUSES.includes(req.query.bookingStatus)) {
         return res.status(400).json({
@@ -435,7 +434,7 @@ const getAllBookings = async (req, res) => {
       filter.bookingStatus = req.query.bookingStatus
     }
 
-    // Filter by paymentStatus
+    
     if (req.query.paymentStatus) {
       if (!VALID_PAYMENT_STATUSES.includes(req.query.paymentStatus)) {
         return res.status(400).json({
@@ -446,7 +445,7 @@ const getAllBookings = async (req, res) => {
       filter.paymentStatus = req.query.paymentStatus
     }
 
-    // Filter by movieId
+    
     if (req.query.movieId) {
       if (!mongoose.isValidObjectId(req.query.movieId)) {
         return res.status(400).json({ success: false, message: "Invalid movieId filter" })
@@ -454,7 +453,7 @@ const getAllBookings = async (req, res) => {
       filter.movie = req.query.movieId
     }
 
-    // Filter by showtimeId
+    
     if (req.query.showtimeId) {
       if (!mongoose.isValidObjectId(req.query.showtimeId)) {
         return res.status(400).json({ success: false, message: "Invalid showtimeId filter" })
@@ -462,7 +461,7 @@ const getAllBookings = async (req, res) => {
       filter.showtime = req.query.showtimeId
     }
 
-    // Filter by userId
+    
     if (req.query.userId) {
       if (!mongoose.isValidObjectId(req.query.userId)) {
         return res.status(400).json({ success: false, message: "Invalid userId filter" })
@@ -470,7 +469,7 @@ const getAllBookings = async (req, res) => {
       filter.user = req.query.userId
     }
 
-    // Search by bookingReference or customer
+    
     if (req.query.search && String(req.query.search).trim()) {
       const searchRegex = new RegExp(String(req.query.search).trim(), "i")
       const matchingUsers = await User.find({
@@ -486,7 +485,7 @@ const getAllBookings = async (req, res) => {
       ]
     }
 
-    // Pagination
+    
     const page = Math.max(1, parseInt(req.query.page, 10) || 1)
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20))
     const skip = (page - 1) * limit

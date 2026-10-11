@@ -28,7 +28,7 @@ const screenSchema = new mongoose.Schema(
       min: [1, "Seats per row must be at least 1"]
     },
 
-    // Always calculated — never trusted from request body
+    
     totalSeats: {
       type: Number
     },
@@ -39,7 +39,7 @@ const screenSchema = new mongoose.Schema(
       default: "active"
     },
 
-    // Admin who created this screen
+    
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -51,12 +51,12 @@ const screenSchema = new mongoose.Schema(
   }
 )
 
-// Auto-calculate totalSeats before every save
+
 screenSchema.pre("save", function () {
   this.totalSeats = this.totalRows * this.seatsPerRow
 })
 
-// Also recalculate on findOneAndUpdate
+
 screenSchema.pre("findOneAndUpdate", function () {
   const update = this.getUpdate()
   const set = update.$set || update
@@ -64,8 +64,8 @@ screenSchema.pre("findOneAndUpdate", function () {
   const rows = set.totalRows !== undefined ? set.totalRows : undefined
   const perRow = set.seatsPerRow !== undefined ? set.seatsPerRow : undefined
 
-  // Only recalculate if at least one dimension changed
-  // We'll handle full recalculation in the controller so both values are available
+  
+  
 })
 
 const Screen = mongoose.model("Screen", screenSchema)

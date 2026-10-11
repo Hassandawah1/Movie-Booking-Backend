@@ -1,0 +1,600 @@
+const mongoose = require("mongoose")
+const axios = require("axios")
+const Movie = require("../models/Movie.model")
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const VALID_STATUSES = ["coming-soon", "now-showing", "ended"]
+
+// Build the RapidAPI headers from env — key is never sent back to client
+const rapidApiHeaders = () => ({
+  "X-RapidAPI-Key": process.env.MOVIE_API_KEY,
+  "X-RapidAPI-Host": process.env.MOVIE_API_BASE_URL
+})
+
+// Base URL always uses https:// — env stores the host without the scheme
+const apiBase = () => `https://${process.env.MOVIE_API_BASE_URL}`
+
+const respondToProviderError = (res, operation, apiErr) => {
+  const status = apiErr.response?.status
+  const providerCode = apiErr.code || null
+  console.error(`External API error (${operation}):`, {
+    status: status || null,
+    code: providerCode
+  })
+
+  let message = "Movie provider is temporarily unavailable. Please try again later."
+  let code = "MOVIE_PROVIDER_UNAVAILABLE"
+
+  if (status === 401 || status === 403) {
+    message = "Movie provider rejected its API credentials or subscription. Check the RapidAPI key and API subscription."
+    code = "MOVIE_PROVIDER_AUTH"
+  } else if (status === 429) {
+    message = "Movie provider request limit reached. Check the RapidAPI quota or try again later."
+    code = "MOVIE_PROVIDER_RATE_LIMITED"
+  } else if (status === 404) {
+    message = "RapidAPI could not find the movie provider endpoint (HTTP 404). Verify the configured host and endpoint path."
+  } else if (status === 400) {
+    message = "RapidAPI rejected the movie search request (HTTP 400). Verify the endpoint's expected query parameters."
+  } else if (status >= 500) {
+    message = `Movie provider returned HTTP ${status}. Check its RapidAPI status and endpoint configuration.`
+  } else if (status) {
+    message = `Movie provider returned HTTP ${status}. Check the RapidAPI endpoint configuration.`
+  } else if (!apiErr.response) {
+    message = "Could not connect to the movie provider. Check the backend network connection and try again."
+    code = "MOVIE_PROVIDER_CONNECTION"
+  }
+
+  return res.status(502).json({
+    success: false,
+    message,
+    code,
+    providerStatus: status || null
+  })
+}
+
+// Normalize a raw result from the netflix-api8 search endpoint
+const normalizeMovie = (raw) => {
+  // The API can return various field names — handle all known variants gracefully
+  const genres = []
+  if (Array.isArray(raw.genres)) {
+    raw.genres.forEach((g) => {
+      if (typeof g === "string") genres.push(g)
+      else if (g && g.name) genres.push(g.name)
+    })
+  }
+
+  // Release date — try releaseYear first, then releaseDate
+  let releaseDate = null
+  if (raw.releaseYear) releaseDate = new Date(`${raw.releaseYear}-01-01`)
+  else if (raw.releaseDate) releaseDate = new Date(raw.releaseDate)
+
+  // Rating — try imdbRating, voteAverage, rating
+  const rating = raw.imdbRating || raw.voteAverage || raw.rating || null
+
+  return {
+    externalMovieId: String(raw.id || raw.titleId || raw.titleID || raw.entityId || raw.entityID || raw.videoId || raw.video_id || raw._id || ""),
+    title: raw.title || raw.name || raw.displayName || raw.originalTitle || "",
+    overview: raw.synopsis || raw.overview || raw.description || "",
+    posterUrl: raw.poster || raw.posterImage || raw.poster_path || raw.verticalArtworkUrl || "",
+    backdropUrl: raw.backdrop || raw.backdropImage || raw.backdrop_path || "",
+    genres,
+    runtime: raw.runtime || raw.duration || null,
+    releaseDate,
+    rating: rating ? Number(rating) : null,
+    language: raw.language || raw.originalLanguage || ""
+  }
+}
+
+const extractMovieRecord = (data) => {
+  const visited = new Set()
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const record = visit(item)
+        if (record) return record
+      }
+      return null
+    }
+    if (!value || typeof value !== "object" || visited.has(value)) return null
+    visited.add(value)
+
+    const normalized = normalizeMovie(value)
+    if (typeof normalized.title === "string" && normalized.title.trim()) return value
+
+    const prioritizedKeys = ["title", "result", "movie", "details", "summary", "value"]
+    for (const key of prioritizedKeys) {
+      if (value[key] && typeof value[key] === "object") {
+        const record = visit(value[key])
+        if (record) return record
+      }
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (!prioritizedKeys.includes(key)) {
+        const record = visit(child)
+        if (record) return record
+      }
+    }
+    return null
+  }
+
+  return visit(data)
+}
+
+const extractSearchResults = (data) => {
+  if (Array.isArray(data)) return data
+  if (!data || typeof data !== "object") return null
+  if (Array.isArray(data.results)) return data.results
+  if (Array.isArray(data.titles)) return data.titles
+
+  const results = []
+  const seen = new Set()
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+    if (!value || typeof value !== "object") return
+
+    if (value.summary && typeof value.summary === "object") {
+      const summary = value.summary
+      const normalized = normalizeMovie(summary)
+      if (normalized.title && normalized.externalMovieId) {
+        if (!seen.has(normalized.externalMovieId)) {
+          seen.add(normalized.externalMovieId)
+          results.push(summary)
+        }
+        return
+      }
+
+      visit(summary)
+      Object.entries(value).forEach(([key, child]) => {
+        if (key !== "summary") visit(child)
+      })
+      return
+    }
+
+    const id = value.entityId || value.entityID || value.titleId || value.titleID || value.id || value.videoId || value.video_id || value._id
+    const title = value.title || value.name || value.displayName || value.originalTitle
+    if (id && title) {
+      const key = String(id)
+      if (!seen.has(key)) {
+        seen.add(key)
+        results.push(value)
+      }
+      return
+    }
+
+    Object.values(value).forEach(visit)
+  }
+
+  visit(data)
+  if (results.length > 0) return results
+
+  const searchPage = data.value?.searchPageByReferenceV2
+  if (searchPage && typeof searchPage === "object" && Object.keys(searchPage).length === 0) return []
+  return null
+}
+
+const describeProviderShape = (value, depth = 0) => {
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      sample: depth < 6 ? value.slice(0, 2).map((item) => describeProviderShape(item, depth + 1)) : undefined
+    }
+  }
+  if (!value || typeof value !== "object") return { type: value === null ? "null" : typeof value }
+
+  const safeKeys = new Set([
+    "value", "paths", "searchPageByReferenceV2", "summary", "entityId", "entityID",
+    "entityKind", "title", "name", "displayName", "originalTitle", "id", "titleId",
+    "titleID", "videoId", "video_id", "verticalArtworkUrl", "items", "results",
+    "searchResults", "videos", "length", "0"
+  ])
+  const keys = Object.keys(value)
+  const visibleKeys = keys.filter((key) => safeKeys.has(key))
+  const otherKeys = keys.filter((key) => !safeKeys.has(key))
+  return {
+    type: "object",
+    keys: visibleKeys,
+    otherKeyCount: otherKeys.length,
+    sample: depth < 6
+      ? visibleKeys.slice(0, 8).reduce((shape, key) => {
+          shape[key] = describeProviderShape(value[key], depth + 1)
+          return shape
+        }, {})
+      : undefined,
+    otherValueSamples: depth < 6
+      ? otherKeys.slice(0, 2).map((key) => describeProviderShape(value[key], depth + 1))
+      : undefined
+  }
+}
+
+// ─── Admin: Search external API ─────────────────────────────────────────────
+
+// @desc    Search movies from external Netflix API
+// @route   GET /api/movies/search?query=...
+// @access  Admin
+const searchMovies = async (req, res) => {
+  try {
+    const query = req.query.query ? req.query.query.trim() : ""
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        message: "Search query is required"
+      })
+    }
+
+    let response
+    try {
+      response = await axios.get(`${apiBase()}/api/search`, {
+        params: { query },
+        headers: rapidApiHeaders()
+      })
+    } catch (apiErr) {
+      return respondToProviderError(res, "search", apiErr)
+    }
+
+    const rawResults = extractSearchResults(response.data)
+    if (!rawResults) {
+      console.error(
+        "External API returned an unexpected search response shape:",
+        JSON.stringify(describeProviderShape(response.data))
+      )
+      return res.status(502).json({
+        success: false,
+        message: "Movie provider returned an unexpected response. Verify the configured RapidAPI host and search endpoint.",
+        code: "MOVIE_PROVIDER_INVALID_RESPONSE"
+      })
+    }
+
+    const results = rawResults
+      .map(normalizeMovie)
+      .filter((movie) => movie.externalMovieId && movie.title)
+
+    return res.status(200).json({
+      success: true,
+      count: results.length,
+      results
+    })
+  } catch (err) {
+    console.error("searchMovies error:", err)
+    return res.status(500).json({
+      success: false,
+      message: "Server error while searching movies"
+    })
+  }
+}
+
+// ─── Admin: Get external movie details ──────────────────────────────────────
+
+// @desc    Fetch single movie details from external API (preview before saving)
+// @route   GET /api/movies/external/:externalMovieId
+// @access  Admin
+const getExternalMovieDetails = async (req, res) => {
+  try {
+    const { externalMovieId } = req.params
+
+    if (!externalMovieId || !externalMovieId.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "External movie ID is required"
+      })
+    }
+
+    let response
+    try {
+      response = await axios.get(`${apiBase()}/api/title/details`, {
+        params: { titleId: externalMovieId.trim() },
+        headers: rapidApiHeaders()
+      })
+    } catch (apiErr) {
+      return respondToProviderError(res, "details", apiErr)
+    }
+
+    const raw = extractMovieRecord(response.data)
+    if (!raw) {
+      return res.status(404).json({
+        success: false,
+        message: "Movie not found in external provider"
+      })
+    }
+
+    const movie = normalizeMovie(raw)
+    if (!movie.externalMovieId) movie.externalMovieId = externalMovieId.trim()
+
+    return res.status(200).json({
+      success: true,
+      movie
+    })
+  } catch (err) {
+    console.error("getExternalMovieDetails error:", err)
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching movie details"
+    })
+  }
+}
+
+// ─── Admin: Add movie to our cinema ─────────────────────────────────────────
+
+// @desc    Fetch from external API and save to our database
+// @route   POST /api/movies
+// @access  Admin
+const addMovieToCinema = async (req, res) => {
+  try {
+    const { externalMovieId } = req.body
+
+    // Validate input
+    if (!externalMovieId || !String(externalMovieId).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "externalMovieId is required"
+      })
+    }
+
+    const cleanId = String(externalMovieId).trim()
+
+    // Check for duplicate
+    const existing = await Movie.findOne({ externalMovieId: cleanId })
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: "This movie has already been added to the cinema"
+      })
+    }
+
+    // Fetch full details from external API
+    let response
+    try {
+      response = await axios.get(`${apiBase()}/api/title/details`, {
+        params: { titleId: cleanId },
+        headers: rapidApiHeaders()
+      })
+    } catch (apiErr) {
+      return respondToProviderError(res, "add movie", apiErr)
+    }
+
+    const raw = extractMovieRecord(response.data)
+    if (!raw) {
+      return res.status(404).json({
+        success: false,
+        message: "Movie not found in external provider"
+      })
+    }
+
+    const normalized = normalizeMovie(raw)
+
+    // Ensure the externalMovieId matches what was requested
+    if (!normalized.externalMovieId) {
+      normalized.externalMovieId = cleanId
+    }
+
+    if (!normalized.title) {
+      return res.status(502).json({
+        success: false,
+        message: "External provider returned incomplete movie data"
+      })
+    }
+
+    // Save to our database
+    const movie = new Movie({
+      ...normalized,
+      status: "coming-soon",
+      createdBy: req.user._id
+    })
+
+    await movie.save()
+
+    return res.status(201).json({
+      success: true,
+      message: "Movie added to cinema successfully",
+      movie
+    })
+  } catch (err) {
+    console.error("addMovieToCinema error:", err)
+    return res.status(500).json({
+      success: false,
+      message: "Server error while adding movie"
+    })
+  }
+}
+
+// ─── Public: Get all our movies ──────────────────────────────────────────────
+
+// @desc    List all movies stored in our database (with optional status filter)
+// @route   GET /api/movies?status=now-showing
+// @access  Public
+const getAllMovies = async (req, res) => {
+  try {
+    const filter = {}
+
+    if (req.query.status) {
+      const status = req.query.status.trim()
+      if (!VALID_STATUSES.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`
+        })
+      }
+      filter.status = status
+    }
+
+    const movies = await Movie.find(filter).sort({ createdAt: -1 })
+
+    return res.status(200).json({
+      success: true,
+      count: movies.length,
+      movies
+    })
+  } catch (err) {
+    console.error("getAllMovies error:", err)
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching movies"
+    })
+  }
+}
+
+// ─── Public: Get single movie by DB id ──────────────────────────────────────
+
+// @desc    Get a single movie from our database by its MongoDB _id
+// @route   GET /api/movies/:id
+// @access  Public
+const getMovieById = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid movie ID format"
+      })
+    }
+
+    const movie = await Movie.findById(req.params.id)
+
+    if (!movie) {
+      return res.status(404).json({
+        success: false,
+        message: "Movie not found"
+      })
+    }
+
+    return res.status(200).json({
+      success: true,
+      movie
+    })
+  } catch (err) {
+    // CastError means the id format was invalid
+    if (err.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid movie ID format"
+      })
+    }
+    console.error("getMovieById error:", err)
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching movie"
+    })
+  }
+}
+
+// ─── Admin: Update movie ─────────────────────────────────────────────────────
+
+// @desc    Update movie status (and optionally title/overview)
+// @route   PUT /api/movies/:id
+// @access  Admin
+const updateMovie = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid movie ID format" })
+    }
+
+    const { status, title, overview } = req.body
+
+    // At least one field must be provided
+    if (status === undefined && title === undefined && overview === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one field to update: status, title, or overview"
+      })
+    }
+
+    const updates = {}
+
+    if (status !== undefined) {
+      const trimmed = String(status).trim()
+      if (!VALID_STATUSES.includes(trimmed)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`
+        })
+      }
+      updates.status = trimmed
+    }
+
+    if (title !== undefined) {
+      const trimmed = String(title).trim()
+      if (!trimmed) {
+        return res.status(400).json({ success: false, message: "Title cannot be empty" })
+      }
+      updates.title = trimmed
+    }
+
+    if (overview !== undefined) {
+      updates.overview = String(overview)
+    }
+
+    const movie = await Movie.findByIdAndUpdate(
+      req.params.id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    )
+
+    if (!movie) {
+      return res.status(404).json({
+        success: false,
+        message: "Movie not found"
+      })
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Movie updated successfully",
+      movie
+    })
+  } catch (err) {
+    console.error("updateMovie error:", err)
+    return res.status(500).json({
+      success: false,
+      message: "Server error while updating movie"
+    })
+  }
+}
+
+// ─── Admin: Delete movie ─────────────────────────────────────────────────────
+
+// @desc    Remove a movie from our cinema database
+// @route   DELETE /api/movies/:id
+// @access  Admin
+const deleteMovie = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid movie ID format" })
+    }
+
+    const movie = await Movie.findByIdAndDelete(req.params.id)
+
+    if (!movie) {
+      return res.status(404).json({
+        success: false,
+        message: "Movie not found"
+      })
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Movie removed successfully"
+    })
+  } catch (err) {
+    console.error("deleteMovie error:", err)
+    return res.status(500).json({
+      success: false,
+      message: "Server error while deleting movie"
+    })
+  }
+}
+
+// ─── Exports ─────────────────────────────────────────────────────────────────
+
+module.exports = {
+  searchMovies,
+  getExternalMovieDetails,
+  addMovieToCinema,
+  getAllMovies,
+  getMovieById,
+  updateMovie,
+  deleteMovie
+}

@@ -17,6 +17,12 @@ const app = express()
 const mongoose = require("mongoose")
 const cors = require("cors")
 const URI = process.env.MONGODB_URI
+const allowedOrigins = [
+  ...(process.env.FRONTEND_URL || "").split(",").map((origin) => origin.trim().replace(/\/+$/, "")).filter(Boolean),
+  "https://movie-booking-flax-chi.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:5175"
+]
 
 let connectionPromise
 const connectToDatabase = async () => {
@@ -41,9 +47,7 @@ const connectToDatabase = async () => {
 
 // Middleware
 const corsOptions = {
-  origin: process.env.FRONTEND_URL
-    ? [process.env.FRONTEND_URL, "http://localhost:5173", "http://localhost:5175"]
-    : true,
+  origin: allowedOrigins,
   credentials: true
 }
 app.use(cors(corsOptions))

@@ -23,10 +23,10 @@ const registerUser = async (req, res) => {
 
     
     const trimmedName = name.trim()
-    if (trimmedName.length < 2) {
+    if (Array.from(trimmedName).length < 3) {
       return res.status(400).json({
         success: false,
-        message: "Name must be at least 2 characters long"
+        message: "Name must be at least 3 characters long"
       })
     }
 
@@ -38,8 +38,8 @@ const registerUser = async (req, res) => {
     }
 
     
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) {
+    const emailRegex = /^[A-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,63}$/i
+    if (typeof email !== "string" || !emailRegex.test(email.trim())) {
       return res.status(400).json({
         success: false,
         message: "Please provide a valid email address"
@@ -47,10 +47,10 @@ const registerUser = async (req, res) => {
     }
 
     
-    if (password.length < 6) {
+    if (typeof password !== "string" || !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9\s])\S{8,}$/.test(password)) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 6 characters long"
+        message: "Password must be at least 8 characters and include uppercase, lowercase, number, and special character"
       })
     }
 

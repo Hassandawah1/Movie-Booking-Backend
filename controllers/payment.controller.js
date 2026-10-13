@@ -314,16 +314,39 @@ const initializePayment = async (req, res) => {
       })
     }
 
-    
+    // Determine dynamic callback URL:
+    // 1. Explicitly passed in req.body.callbackUrl
+    // 2. Extracted from request origin or referer header
+    // 3. Fallback to FRONTEND_URL or production app URL
+    let resolvedCallbackUrl = req.body?.callbackUrl
+
+    if (!resolvedCallbackUrl || typeof resolvedCallbackUrl !== "string" || !resolvedCallbackUrl.trim()) {
+      let detectedOrigin = null
+      if (req.headers.origin) {
+        detectedOrigin = req.headers.origin
+      } else if (req.headers.referer) {
+        try {
+          detectedOrigin = new URL(req.headers.referer).origin
+        } catch {
+          detectedOrigin = null
+        }
+      }
+
+      if (detectedOrigin) {
+        resolvedCallbackUrl = `${detectedOrigin.replace(/\/+$/, "")}/payment/callback`
+      } else {
+        const fallbackOrigin = process.env.FRONTEND_URL || "https://movie-booking-flax-chi.vercel.app"
+        resolvedCallbackUrl = `${fallbackOrigin.replace(/\/+$/, "")}/payment/callback`
+      }
+    }
+
     const paystackResponse = await axios.post(
       `${baseUrl}/transaction/initialize`,
       {
         email: customerEmail,
         amount: amountInKobo,
         reference: paymentRef,
-        callback_url:
-          req.body?.callbackUrl ||
-          `${process.env.FRONTEND_URL || "http://localhost:5173"}/payment/callback`,
+        callback_url: resolvedCallbackUrl,
         metadata: {
           bookingId: booking._id.toString(),
           bookingReference: booking.bookingReference,

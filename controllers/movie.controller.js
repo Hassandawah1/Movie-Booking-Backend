@@ -15,6 +15,21 @@ const rapidApiHeaders = () => ({
 
 const apiBase = () => `https://${process.env.MOVIE_API_BASE_URL}`
 
+const firstImageUrl = (value) => {
+  if (typeof value === "string") return value.trim()
+  if (!value || typeof value !== "object") return ""
+  if (Array.isArray(value)) {
+    return value.map(firstImageUrl).find(Boolean) || ""
+  }
+
+  for (const key of ["url", "src", "value", "image", "artwork", "verticalArtwork", "poster"]) {
+    const imageUrl = firstImageUrl(value[key])
+    if (imageUrl) return imageUrl
+  }
+
+  return ""
+}
+
 const respondToProviderError = (res, operation, apiErr) => {
   const status = apiErr.response?.status
   const providerCode = apiErr.code || null
@@ -55,34 +70,61 @@ const respondToProviderError = (res, operation, apiErr) => {
 
 
 const normalizeMovie = (raw) => {
-  
+  const summary = raw.summary && typeof raw.summary === "object" ? raw.summary : null
+  const movieData = summary ? { ...raw, ...summary } : raw
   const genres = []
-  if (Array.isArray(raw.genres)) {
-    raw.genres.forEach((g) => {
+  if (Array.isArray(movieData.genres)) {
+    movieData.genres.forEach((g) => {
       if (typeof g === "string") genres.push(g)
       else if (g && g.name) genres.push(g.name)
     })
   }
 
-  
   let releaseDate = null
-  if (raw.releaseYear) releaseDate = new Date(`${raw.releaseYear}-01-01`)
-  else if (raw.releaseDate) releaseDate = new Date(raw.releaseDate)
+  if (movieData.releaseYear) releaseDate = new Date(`${movieData.releaseYear}-01-01`)
+  else if (movieData.releaseDate) releaseDate = new Date(movieData.releaseDate)
 
-  
-  const rating = raw.imdbRating || raw.voteAverage || raw.rating || null
+  const rating = movieData.imdbRating || movieData.voteAverage || movieData.rating || null
+  const externalMovieId =
+    movieData.id ||
+    movieData.titleId ||
+    movieData.titleID ||
+    movieData.entityId ||
+    movieData.entityID ||
+    movieData.videoId ||
+    movieData.video_id ||
+    movieData._id ||
+    raw.entityId ||
+    raw.entityID ||
+    raw.titleId ||
+    raw.titleID ||
+    raw.id ||
+    raw.videoId ||
+    raw.video_id ||
+    raw._id ||
+    ""
 
   return {
-    externalMovieId: String(raw.id || raw.titleId || raw.titleID || raw.entityId || raw.entityID || raw.videoId || raw.video_id || raw._id || ""),
-    title: raw.title || raw.name || raw.displayName || raw.originalTitle || "",
-    overview: raw.synopsis || raw.overview || raw.description || "",
-    posterUrl: raw.poster || raw.posterImage || raw.poster_path || raw.verticalArtworkUrl || "",
-    backdropUrl: raw.backdrop || raw.backdropImage || raw.backdrop_path || "",
+    externalMovieId: String(externalMovieId),
+    title: movieData.title || movieData.name || movieData.displayName || movieData.originalTitle || "",
+    overview: movieData.synopsis || movieData.overview || movieData.description || "",
+    posterUrl:
+      firstImageUrl(movieData.verticalArtworkUrl) ||
+      firstImageUrl(movieData.poster) ||
+      firstImageUrl(movieData.posterImage) ||
+      firstImageUrl(movieData.poster_path) ||
+      firstImageUrl(raw.verticalArtworkUrl) ||
+      "",
+    backdropUrl:
+      firstImageUrl(movieData.backdrop) ||
+      firstImageUrl(movieData.backdropImage) ||
+      firstImageUrl(movieData.backdrop_path) ||
+      "",
     genres,
-    runtime: raw.runtime || raw.duration || null,
+    runtime: movieData.runtime || movieData.duration || null,
     releaseDate,
     rating: rating ? Number(rating) : null,
-    language: raw.language || raw.originalLanguage || ""
+    language: movieData.language || movieData.originalLanguage || ""
   }
 }
 
@@ -98,6 +140,10 @@ const extractMovieRecord = (data) => {
     }
     if (!value || typeof value !== "object" || visited.has(value)) return null
     visited.add(value)
+
+    if (value.summary && typeof value.summary === "object") {
+      return { ...value, ...value.summary }
+    }
 
     const normalized = normalizeMovie(value)
     if (typeof normalized.title === "string" && normalized.title.trim()) return value
@@ -137,17 +183,17 @@ const extractSearchResults = (data) => {
     if (!value || typeof value !== "object") return
 
     if (value.summary && typeof value.summary === "object") {
-      const summary = value.summary
-      const normalized = normalizeMovie(summary)
+      const record = { ...value, ...value.summary }
+      const normalized = normalizeMovie(record)
       if (normalized.title && normalized.externalMovieId) {
         if (!seen.has(normalized.externalMovieId)) {
           seen.add(normalized.externalMovieId)
-          results.push(summary)
+          results.push(record)
         }
         return
       }
 
-      visit(summary)
+      visit(record)
       Object.entries(value).forEach(([key, child]) => {
         if (key !== "summary") visit(child)
       })

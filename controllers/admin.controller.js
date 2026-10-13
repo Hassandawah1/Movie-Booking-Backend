@@ -34,7 +34,6 @@ const toLocalDateString = (date) => {
 
 
 
-
 const getDashboardSummary = async (req, res) => {
   try {
     const todayStart = todayMidnight()

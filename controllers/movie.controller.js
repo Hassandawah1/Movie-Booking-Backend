@@ -233,44 +233,38 @@ const extractSearchResults = (data) => {
   if (Array.isArray(data.titles)) return data.titles
 
   const results = []
-  const seen = new Set()
+  const seenIds = new Set()
+  const visited = new Set()
+
   const visit = (value) => {
+    if (!value || typeof value !== "object" || visited.has(value)) return
+    visited.add(value)
+
     if (Array.isArray(value)) {
-      value.forEach(visit)
-      return
-    }
-    if (!value || typeof value !== "object") return
-
-    if (value.summary && typeof value.summary === "object") {
-      const record = { ...value, ...value.summary }
-      const normalized = normalizeMovie(record)
-      if (normalized.title && normalized.externalMovieId) {
-        if (!seen.has(normalized.externalMovieId)) {
-          seen.add(normalized.externalMovieId)
-          results.push(record)
-        }
-        return
+      for (const item of value) {
+        visit(item)
       }
-
-      visit(record)
-      Object.entries(value).forEach(([key, child]) => {
-        if (key !== "summary") visit(child)
-      })
       return
     }
 
-    const id = value.entityId || value.entityID || value.titleId || value.titleID || value.id || value.videoId || value.video_id || value._id
-    const title = value.title || value.name || value.displayName || value.originalTitle
-    if (id && title) {
+    const summary = value.summary && typeof value.summary === "object" ? value.summary : null
+    const candidate = summary ? { ...value, ...summary } : value
+
+    const id = candidate.entityId || candidate.entityID || candidate.titleId || candidate.titleID || candidate.id || candidate.videoId || candidate.video_id || candidate._id
+    const title = candidate.title || candidate.name || candidate.displayName || candidate.originalTitle
+
+    if (id && title && typeof title === "string" && title.trim()) {
       const key = String(id)
-      if (!seen.has(key)) {
-        seen.add(key)
-        results.push(value)
+      if (!seenIds.has(key)) {
+        seenIds.add(key)
+        results.push(candidate)
       }
       return
     }
 
-    Object.values(value).forEach(visit)
+    for (const child of Object.values(value)) {
+      visit(child)
+    }
   }
 
   visit(data)

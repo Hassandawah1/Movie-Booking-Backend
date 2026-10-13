@@ -22,7 +22,12 @@ const firstImageUrl = (value) => {
     return value.map(firstImageUrl).find(Boolean) || ""
   }
 
-  for (const key of ["url", "src", "value", "image", "artwork", "verticalArtwork", "poster"]) {
+  for (const key of [
+    "url", "src", "value", "image", "artwork", "verticalArtwork",
+    "verticalArtworkUrl", "verticalDisplayArt", "verticalBackgroundArt",
+    "storyArt", "interestingMoments", "placeholderImage", "boxArt",
+    "poster", "posterImage", "poster_path", "backdrop", "backdropImage", "backdrop_path"
+  ]) {
     const imageUrl = firstImageUrl(value[key])
     if (imageUrl) return imageUrl
   }
@@ -71,7 +76,18 @@ const respondToProviderError = (res, operation, apiErr) => {
 
 const normalizeMovie = (raw) => {
   const summary = raw.summary && typeof raw.summary === "object" ? raw.summary : null
-  const movieData = summary ? { ...raw, ...summary } : raw
+  const details = raw.details && typeof raw.details === "object" ? raw.details : null
+  const artwork = raw.dpSpecialCases?.videoInDP?.artwork && typeof raw.dpSpecialCases.videoInDP.artwork === "object"
+    ? raw.dpSpecialCases.videoInDP.artwork
+    : null
+
+  const movieData = {
+    ...raw,
+    ...(details || {}),
+    ...(summary || {}),
+    ...(artwork || {})
+  }
+
   const genres = []
   if (Array.isArray(movieData.genres)) {
     movieData.genres.forEach((g) => {
@@ -104,24 +120,47 @@ const normalizeMovie = (raw) => {
     raw._id ||
     ""
 
+  const rawRuntime = movieData.runtime || movieData.duration || raw.runtime || raw.duration
+  const runtime = rawRuntime
+    ? (Number(rawRuntime) > 300 ? Math.round(Number(rawRuntime) / 60) : Number(rawRuntime))
+    : null
+
+  const posterUrl =
+    firstImageUrl(movieData.verticalArtworkUrl) ||
+    firstImageUrl(movieData.verticalDisplayArt) ||
+    firstImageUrl(movieData.verticalBackgroundArt) ||
+    firstImageUrl(movieData.storyArt) ||
+    firstImageUrl(movieData.boxArt) ||
+    firstImageUrl(movieData.poster) ||
+    firstImageUrl(movieData.posterImage) ||
+    firstImageUrl(movieData.poster_path) ||
+    firstImageUrl(raw.verticalArtworkUrl) ||
+    firstImageUrl(raw.verticalDisplayArt) ||
+    firstImageUrl(raw.verticalBackgroundArt) ||
+    firstImageUrl(raw.storyArt) ||
+    firstImageUrl(raw.boxArt) ||
+    ""
+
+  const backdropUrl =
+    firstImageUrl(movieData.interestingMoments) ||
+    firstImageUrl(movieData.storyArt) ||
+    firstImageUrl(movieData.placeholderImage) ||
+    firstImageUrl(movieData.backdrop) ||
+    firstImageUrl(movieData.backdropImage) ||
+    firstImageUrl(movieData.backdrop_path) ||
+    firstImageUrl(raw.interestingMoments) ||
+    firstImageUrl(raw.placeholderImage) ||
+    posterUrl ||
+    ""
+
   return {
     externalMovieId: String(externalMovieId),
     title: movieData.title || movieData.name || movieData.displayName || movieData.originalTitle || "",
     overview: movieData.synopsis || movieData.overview || movieData.description || "",
-    posterUrl:
-      firstImageUrl(movieData.verticalArtworkUrl) ||
-      firstImageUrl(movieData.poster) ||
-      firstImageUrl(movieData.posterImage) ||
-      firstImageUrl(movieData.poster_path) ||
-      firstImageUrl(raw.verticalArtworkUrl) ||
-      "",
-    backdropUrl:
-      firstImageUrl(movieData.backdrop) ||
-      firstImageUrl(movieData.backdropImage) ||
-      firstImageUrl(movieData.backdrop_path) ||
-      "",
+    posterUrl,
+    backdropUrl,
     genres,
-    runtime: movieData.runtime || movieData.duration || null,
+    runtime,
     releaseDate,
     rating: rating ? Number(rating) : null,
     language: movieData.language || movieData.originalLanguage || ""
@@ -129,6 +168,26 @@ const normalizeMovie = (raw) => {
 }
 
 const extractMovieRecord = (data) => {
+  if (!data || typeof data !== "object") return null
+
+  // Fast-path: RapidAPI Netflix title details response: value.videos[titleId]
+  if (data.value?.videos && typeof data.value.videos === "object") {
+    const videoEntries = Object.entries(data.value.videos)
+    if (videoEntries.length > 0) {
+      const [videoId, vid] = videoEntries[0]
+      if (vid && typeof vid === "object") {
+        return {
+          id: videoId,
+          entityId: videoId,
+          ...vid,
+          ...(vid.details || {}),
+          ...(vid.summary || {}),
+          ...(vid.dpSpecialCases?.videoInDP?.artwork || {})
+        }
+      }
+    }
+  }
+
   const visited = new Set()
   const visit = (value) => {
     if (Array.isArray(value)) {
@@ -371,9 +430,8 @@ const getExternalMovieDetails = async (req, res) => {
 
 const addMovieToCinema = async (req, res) => {
   try {
-    const { externalMovieId } = req.body
+    const { externalMovieId, posterUrl, backdropUrl, overview, runtime } = req.body
 
-    
     if (!externalMovieId || !String(externalMovieId).trim()) {
       return res.status(400).json({
         success: false,
@@ -383,7 +441,6 @@ const addMovieToCinema = async (req, res) => {
 
     const cleanId = String(externalMovieId).trim()
 
-    
     const existing = await Movie.findOne({ externalMovieId: cleanId })
     if (existing) {
       return res.status(409).json({
@@ -392,7 +449,6 @@ const addMovieToCinema = async (req, res) => {
       })
     }
 
-    
     let response
     try {
       response = await axios.get(`${apiBase()}/api/title/details`, {
@@ -413,9 +469,22 @@ const addMovieToCinema = async (req, res) => {
 
     const normalized = normalizeMovie(raw)
 
-    
     if (!normalized.externalMovieId) {
       normalized.externalMovieId = cleanId
+    }
+
+    if (!normalized.posterUrl && posterUrl) {
+      normalized.posterUrl = String(posterUrl).trim()
+    }
+    if (!normalized.backdropUrl && backdropUrl) {
+      normalized.backdropUrl = String(backdropUrl).trim()
+    }
+    if (!normalized.runtime && runtime) {
+      const num = Number(runtime)
+      normalized.runtime = num > 300 ? Math.round(num / 60) : num
+    }
+    if (!normalized.overview && overview) {
+      normalized.overview = String(overview).trim()
     }
 
     if (!normalized.title) {

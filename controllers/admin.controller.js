@@ -668,6 +668,17 @@ const updateUserRole = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" })
     }
 
+    // Check if trying to modify the main admin's role
+    if (user.email === process.env.ADMIN_EMAIL) {
+      // Only allow the main admin themselves to modify their role
+      if (req.user.email !== process.env.ADMIN_EMAIL) {
+        return res.status(403).json({
+          success: false,
+          message: "Only the main administrator can modify the main administrator's role"
+        });
+      }
+    }
+
     const previousRole = user.role
     if (previousRole !== role) {
       user.role = role

@@ -669,9 +669,13 @@ const updateUserRole = async (req, res) => {
     }
 
     // Check if trying to modify the main admin's role
-    if (user.email === process.env.ADMIN_EMAIL) {
+    const mainAdminEmail = process.env.ADMIN_EMAIL?.toLowerCase().trim() || '';
+    const targetUserEmail = user.email?.toLowerCase().trim() || '';
+    const requestingUserEmail = req.user.email?.toLowerCase().trim() || '';
+
+    if (targetUserEmail === mainAdminEmail && mainAdminEmail !== '') {
       // Only allow the main admin themselves to modify their role
-      if (req.user.email !== process.env.ADMIN_EMAIL) {
+      if (requestingUserEmail !== mainAdminEmail) {
         return res.status(403).json({
           success: false,
           message: "Only the main administrator can modify the main administrator's role"
